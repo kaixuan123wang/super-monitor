@@ -50,4 +50,12 @@ export function post<T>(url: string, data?: unknown, config?: AxiosRequestConfig
   return request.post(url, data, config).then((r) => r.data);
 }
 
+export function put<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
+  return request.put(url, data, config).then((r) => r.data);
+}
+
+export function del<T>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
+  return request.delete(url, config).then((r) => r.data);
+}
+
 export default request;

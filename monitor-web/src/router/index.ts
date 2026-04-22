@@ -47,6 +47,27 @@ const routes: RouteRecordRaw[] = [
         name: 'Tracking',
         component: () => import('@/views/tracking/index.vue'),
         meta: { title: '用户埋点', icon: 'Aim' },
+        redirect: '/tracking/events',
+        children: [
+          {
+            path: 'events',
+            name: 'TrackEvents',
+            component: () => import('@/views/tracking/events/index.vue'),
+            meta: { title: '事件管理' },
+          },
+          {
+            path: 'events/:eventName',
+            name: 'TrackEventDetail',
+            component: () => import('@/views/tracking/events/detail.vue'),
+            meta: { title: '事件详情' },
+          },
+          {
+            path: 'analysis',
+            name: 'TrackAnalysis',
+            component: () => import('@/views/tracking/analysis/index.vue'),
+            meta: { title: '事件分析' },
+          },
+        ],
       },
       {
         path: 'users',

@@ -1,18 +1,32 @@
 /**
  * SDK 主入口：Monitor 单例
  *
- * Phase 1 目标：搭建骨架，提供初始化 / 上报 / 身份 / 超级属性 / 计时器等核心能力，
- * 能成功编译并生成 UMD / ESM / IIFE 三份产物。
- * 插件（error / network / performance / auto-track 等）在 Phase 2 具体实现。
+ * Phase 2 在 Phase 1 骨架基础上补齐：
+ * - 集成 error / network / performance / breadcrumb / console 插件
+ * - Reporter 注入公共上下文（url / ua / breadcrumb / distinct_id 等）
+ * - 补充 identify_anonymous / appendUserProperties / setUserPropertiesOnce 等 API
  */
 
-import type { CollectPayload, MonitorConfig, Properties } from '../types';
-import { createLogger, now } from './utils';
+import type {
+  CollectPayload,
+  MonitorConfig,
+  Properties,
+  ReportContext,
+  BreadcrumbItem,
+} from '../types';
+import { createLogger, now, parseUA } from './utils';
 import { Store } from './store';
 import { Reporter, buildReporterFromConfig } from './reporter';
 import { Identity } from './identity';
 import { SuperProperties } from './super-props';
 import { Timer } from './timer';
+import { BreadcrumbBuffer } from './breadcrumb-buffer';
+import { installErrorPlugin } from '../plugins/error';
+import { installNetworkPlugin } from '../plugins/network';
+import { installPerformancePlugin } from '../plugins/performance';
+import { installBreadcrumbPlugin } from '../plugins/breadcrumb';
+import { installConsolePlugin } from '../plugins/console';
+import { installAutoTrackPlugin } from '../plugins/auto-track';
 
 export const SDK_VERSION = '1.0.0';
 
@@ -23,8 +37,10 @@ class MonitorSDK {
   private identity: Identity | null = null;
   private superProps: SuperProperties | null = null;
   private timer: Timer | null = null;
+  private breadcrumb: BreadcrumbBuffer | null = null;
   private logger = createLogger(false);
   private initialized = false;
+  private cleanups: Array<() => void> = [];
 
   /** 初始化 SDK */
   init(config: MonitorConfig): void {
@@ -40,7 +56,14 @@ class MonitorSDK {
       sdkVersion: SDK_VERSION,
       environment: 'production',
       debug: false,
-      plugins: { error: true, console: false, network: true, performance: true, breadcrumb: true },
+      performanceSampleRate: 0.1,
+      plugins: {
+        error: true,
+        console: true,
+        network: true,
+        performance: true,
+        breadcrumb: true,
+      },
       tracking: {
         enableTracking: true,
         autoTrack: { pageView: true, click: true, pageLeave: true, exposure: false },
@@ -59,15 +82,22 @@ class MonitorSDK {
 
     this.logger = createLogger(!!this.config.debug);
     this.store = new Store({ maxQueueSize: this.config.reporter?.maxQueueSize ?? 100 });
-    this.reporter = buildReporterFromConfig(this.config, this.store);
-    this.reporter.start();
+    this.breadcrumb = new BreadcrumbBuffer(30);
 
     this.identity = new Identity(this.config.tracking?.anonymousIdPrefix);
     this.superProps = new SuperProperties();
     this.timer = new Timer();
 
+    this.reporter = buildReporterFromConfig(this.config, this.store, () => this.buildContext());
+    this.reporter.start();
+
+    this.installPlugins();
+
     this.initialized = true;
-    this.logger.log('SDK initialized', { appId: this.config.appId, env: this.config.environment });
+    this.logger.log('SDK initialized', {
+      appId: this.config.appId,
+      env: this.config.environment,
+    });
   }
 
   /** 手动上报一条数据 */
@@ -82,7 +112,21 @@ class MonitorSDK {
     return this.reporter!.flush();
   }
 
-  /** ========== 埋点 API（Phase 2 完整实现） ========== */
+  /** 销毁 SDK（主要用于测试 / 插件热卸载） */
+  destroy(): void {
+    for (const fn of this.cleanups) {
+      try {
+        fn();
+      } catch {
+        /* ignore */
+      }
+    }
+    this.cleanups = [];
+    this.reporter?.stop();
+    this.initialized = false;
+  }
+
+  /** ========== 埋点 API ========== */
 
   track(eventName: string, properties?: Properties): void {
     if (!this.ensureReady()) return;
@@ -116,6 +160,12 @@ class MonitorSDK {
         },
       });
     }
+  }
+
+  /** 手动设置匿名 ID（高级用法，如跨端统一匿名标识） */
+  identify_anonymous(anonymousId: string): void {
+    if (!this.ensureReady()) return;
+    this.identity!.setAnonymousId(anonymousId);
   }
 
   logout(): void {
@@ -162,6 +212,19 @@ class MonitorSDK {
     });
   }
 
+  unsetUserProperty(propertyName: string): void {
+    if (!this.ensureReady()) return;
+    this.report({
+      type: 'profile',
+      data: {
+        distinct_id: this.identity!.getDistinctId(),
+        is_login_id: this.identity!.isLoginId(),
+        operation: 'unset',
+        properties: { [propertyName]: true },
+      },
+    });
+  }
+
   registerSuperProperties(properties: Properties): void {
     if (!this.ensureReady()) return;
     this.superProps!.register(properties);
@@ -188,7 +251,106 @@ class MonitorSDK {
     this.track(eventName, { ...(properties || {}), $event_duration: duration ?? 0 });
   }
 
-  /** 内部工具 */
+  /** 手动新增一条面包屑 */
+  addBreadcrumb(item: Omit<BreadcrumbItem, 'timestamp'>): void {
+    if (!this.ensureReady()) return;
+    this.breadcrumb!.push(item);
+  }
+
+  /** ========== 内部实现 ========== */
+
+  private installPlugins(): void {
+    const cfg = this.config!;
+    const report = (p: CollectPayload): void => this.reporter!.report(p);
+
+    if (cfg.plugins?.breadcrumb !== false) {
+      this.cleanups.push(installBreadcrumbPlugin({ buffer: this.breadcrumb! }));
+    }
+
+    if (cfg.plugins?.console) {
+      this.cleanups.push(installConsolePlugin({ buffer: this.breadcrumb! }));
+    }
+
+    if (cfg.plugins?.error !== false) {
+      this.cleanups.push(installErrorPlugin({ report, debug: cfg.debug }));
+    }
+
+    if (cfg.plugins?.network !== false) {
+      this.cleanups.push(
+        installNetworkPlugin({
+          report,
+          breadcrumb: this.breadcrumb!,
+          sanitize: cfg.sanitize,
+        })
+      );
+    }
+
+    if (cfg.plugins?.performance !== false) {
+      this.cleanups.push(
+        installPerformancePlugin({
+          report,
+          sampleRate: cfg.performanceSampleRate,
+        })
+      );
+    }
+
+    if (cfg.tracking?.enableTracking !== false && cfg.tracking?.autoTrack) {
+      const autoTrackCfg = cfg.tracking.autoTrack;
+      const hasAnyAutoTrack =
+        autoTrackCfg.pageView !== false ||
+        autoTrackCfg.click !== false ||
+        autoTrackCfg.pageLeave !== false;
+
+      if (hasAnyAutoTrack) {
+        this.cleanups.push(
+          installAutoTrackPlugin({
+            track: (event, properties) => this.track(event, properties as import('../types').Properties),
+            config: cfg.tracking,
+          })
+        );
+      }
+    }
+  }
+
+  /** 构造上报上下文（每次发送时调用一次） */
+  private buildContext(): ReportContext {
+    const cfg = this.config!;
+    const ctx: ReportContext = {
+      sdk_version: cfg.sdkVersion || SDK_VERSION,
+      release: cfg.release,
+      environment: cfg.environment,
+    };
+    if (typeof window !== 'undefined') {
+      try {
+        ctx.url = window.location?.href;
+        ctx.referrer = document.referrer;
+        ctx.user_agent = navigator.userAgent;
+        ctx.language = navigator.language;
+        ctx.timezone = Intl?.DateTimeFormat
+          ? Intl.DateTimeFormat().resolvedOptions().timeZone
+          : undefined;
+        ctx.viewport = `${window.innerWidth}x${window.innerHeight}`;
+        ctx.screen_resolution = `${screen.width}x${screen.height}`;
+        const parsed = parseUA(navigator.userAgent);
+        (ctx as Record<string, unknown>).browser = parsed.browser;
+        (ctx as Record<string, unknown>).browser_version = parsed.browser_version;
+        (ctx as Record<string, unknown>).os = parsed.os;
+        (ctx as Record<string, unknown>).os_version = parsed.os_version;
+        (ctx as Record<string, unknown>).device_type = parsed.device_type;
+      } catch {
+        /* ignore */
+      }
+    }
+    if (this.identity) {
+      ctx.distinct_id = this.identity.getDistinctId();
+      ctx.anonymous_id = this.identity.getAnonymousId();
+    }
+    if (this.breadcrumb) {
+      ctx.breadcrumb = this.breadcrumb.getAll();
+    }
+    return ctx;
+  }
+
   private ensureReady(): boolean {
     if (!this.initialized) {
       this.logger.warn('Monitor not initialized. Call Monitor.init(config) first.');

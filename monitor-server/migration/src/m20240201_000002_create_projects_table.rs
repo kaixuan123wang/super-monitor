@@ -1,0 +1,153 @@
+use sea_orm_migration::prelude::*;
+
+#[derive(DeriveMigrationName)]
+pub struct Migration;
+
+#[async_trait::async_trait]
+impl MigrationTrait for Migration {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .create_table(
+                Table::create()
+                    .table(Projects::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(Projects::Id)
+                            .integer()
+                            .not_null()
+                            .auto_increment()
+                            .primary_key(),
+                    )
+                    .col(ColumnDef::new(Projects::Name).string_len(100).not_null())
+                    .col(
+                        ColumnDef::new(Projects::AppId)
+                            .string_len(32)
+                            .not_null()
+                            .unique_key(),
+                    )
+                    .col(
+                        ColumnDef::new(Projects::AppKey)
+                            .string_len(64)
+                            .not_null()
+                            .unique_key(),
+                    )
+                    .col(ColumnDef::new(Projects::GroupId).integer().not_null())
+                    .col(ColumnDef::new(Projects::OwnerId).integer().not_null())
+                    .col(ColumnDef::new(Projects::Description).text().null())
+                    .col(
+                        ColumnDef::new(Projects::AlertThreshold)
+                            .integer()
+                            .not_null()
+                            .default(10),
+                    )
+                    .col(ColumnDef::new(Projects::AlertWebhook).string_len(500).null())
+                    .col(
+                        ColumnDef::new(Projects::DataRetentionDays)
+                            .integer()
+                            .not_null()
+                            .default(30),
+                    )
+                    .col(
+                        ColumnDef::new(Projects::Environment)
+                            .string_len(20)
+                            .not_null()
+                            .default("production"),
+                    )
+                    .col(
+                        ColumnDef::new(Projects::CreatedAt)
+                            .timestamp_with_time_zone()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
+                    .col(
+                        ColumnDef::new(Projects::UpdatedAt)
+                            .timestamp_with_time_zone()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_table(
+                Table::create()
+                    .table(ProjectMembers::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(ProjectMembers::Id)
+                            .integer()
+                            .not_null()
+                            .auto_increment()
+                            .primary_key(),
+                    )
+                    .col(ColumnDef::new(ProjectMembers::ProjectId).integer().not_null())
+                    .col(ColumnDef::new(ProjectMembers::UserId).integer().not_null())
+                    .col(
+                        ColumnDef::new(ProjectMembers::Role)
+                            .string_len(20)
+                            .not_null()
+                            .default("member"),
+                    )
+                    .col(
+                        ColumnDef::new(ProjectMembers::CreatedAt)
+                            .timestamp_with_time_zone()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_project_members_unique")
+                    .table(ProjectMembers::Table)
+                    .col(ProjectMembers::ProjectId)
+                    .col(ProjectMembers::UserId)
+                    .unique()
+                    .to_owned(),
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_table(Table::drop().table(ProjectMembers::Table).to_owned())
+            .await?;
+        manager
+            .drop_table(Table::drop().table(Projects::Table).to_owned())
+            .await
+    }
+}
+
+#[derive(DeriveIden)]
+pub enum Projects {
+    Table,
+    Id,
+    Name,
+    AppId,
+    AppKey,
+    GroupId,
+    OwnerId,
+    Description,
+    AlertThreshold,
+    AlertWebhook,
+    DataRetentionDays,
+    Environment,
+    CreatedAt,
+    UpdatedAt,
+}
+
+#[derive(DeriveIden)]
+pub enum ProjectMembers {
+    Table,
+    Id,
+    ProjectId,
+    UserId,
+    Role,
+    CreatedAt,
+}

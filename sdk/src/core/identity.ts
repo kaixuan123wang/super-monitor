@@ -47,6 +47,12 @@ export class Identity {
     return !!this.loginId;
   }
 
+  /** 手动重置匿名 ID（跨端统一 / 测试场景） */
+  setAnonymousId(anonymousId: string): void {
+    this.anonymousId = anonymousId;
+    safeStorage.set(ANON_STORAGE_KEY, anonymousId);
+  }
+
   /** 用户登录：关联登录 ID */
   identify(userId: string): { originalId: string; distinctId: string } {
     const originalId = this.getDistinctId();

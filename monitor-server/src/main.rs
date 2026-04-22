@@ -1,7 +1,8 @@
 use std::net::SocketAddr;
 
 use anyhow::Context;
-use monitor_server::{config::Config, db, router};
+use migration::{Migrator, MigratorTrait};
+use monitor_server::{config::Config, db, router, services::stats_service};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -16,17 +17,30 @@ async fn main() -> anyhow::Result<()> {
     let cfg = Config::from_env().context("failed to load config from env")?;
     tracing::info!(port = cfg.server_port, "starting monitor-server");
 
-    // 数据库连接（Phase 1 允许失败后打印警告，不阻塞 /health）
+    // 数据库连接（Phase 2 起：连接成功后自动运行迁移）
     let db_conn = match db::connect(&cfg.database_url).await {
         Ok(conn) => {
             tracing::info!("database connected");
+            match Migrator::up(&conn, None).await {
+                Ok(_) => tracing::info!("database migrations applied"),
+                Err(e) => tracing::warn!(error = %e, "database migration failed"),
+            }
             Some(conn)
         }
         Err(e) => {
-            tracing::warn!(error = %e, "database connection failed, running without DB (Phase 1 only)");
+            tracing::warn!(error = %e, "database connection failed, running without DB (collect endpoints will reject)");
             None
         }
     };
+
+    // 启动预聚合后台任务（有 DB 连接时）
+    if let Some(ref conn) = db_conn {
+        let conn_clone = conn.clone();
+        tokio::spawn(async move {
+            stats_service::start_aggregation_loop(conn_clone).await;
+        });
+        tracing::info!("stats aggregation background task started");
+    }
 
     let state = router::AppState {
         config: cfg.clone(),

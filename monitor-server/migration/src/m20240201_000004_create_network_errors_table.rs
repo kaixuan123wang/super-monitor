@@ -1,0 +1,97 @@
+use sea_orm_migration::prelude::*;
+
+#[derive(DeriveMigrationName)]
+pub struct Migration;
+
+#[async_trait::async_trait]
+impl MigrationTrait for Migration {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .create_table(
+                Table::create()
+                    .table(NetworkErrors::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(NetworkErrors::Id)
+                            .big_integer()
+                            .not_null()
+                            .auto_increment()
+                            .primary_key(),
+                    )
+                    .col(ColumnDef::new(NetworkErrors::ProjectId).integer().not_null())
+                    .col(ColumnDef::new(NetworkErrors::AppId).string_len(32).not_null())
+                    .col(ColumnDef::new(NetworkErrors::Url).string_len(500).not_null())
+                    .col(ColumnDef::new(NetworkErrors::Method).string_len(10).not_null())
+                    .col(ColumnDef::new(NetworkErrors::Status).integer().null())
+                    .col(ColumnDef::new(NetworkErrors::RequestHeaders).json_binary().null())
+                    .col(ColumnDef::new(NetworkErrors::RequestBody).text().null())
+                    .col(ColumnDef::new(NetworkErrors::ResponseHeaders).json_binary().null())
+                    .col(ColumnDef::new(NetworkErrors::ResponseText).text().null())
+                    .col(ColumnDef::new(NetworkErrors::Duration).integer().null())
+                    .col(ColumnDef::new(NetworkErrors::ErrorType).string_len(50).null())
+                    .col(ColumnDef::new(NetworkErrors::UserAgent).string_len(500).null())
+                    .col(ColumnDef::new(NetworkErrors::Browser).string_len(50).null())
+                    .col(ColumnDef::new(NetworkErrors::Os).string_len(50).null())
+                    .col(ColumnDef::new(NetworkErrors::Device).string_len(50).null())
+                    .col(ColumnDef::new(NetworkErrors::SdkVersion).string_len(20).null())
+                    .col(ColumnDef::new(NetworkErrors::Release).string_len(50).null())
+                    .col(ColumnDef::new(NetworkErrors::Environment).string_len(20).null())
+                    .col(ColumnDef::new(NetworkErrors::PageUrl).string_len(500).null())
+                    .col(ColumnDef::new(NetworkErrors::DistinctId).string_len(128).null())
+                    .col(
+                        ColumnDef::new(NetworkErrors::CreatedAt)
+                            .timestamp_with_time_zone()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_network_errors_project_time")
+                    .table(NetworkErrors::Table)
+                    .col(NetworkErrors::ProjectId)
+                    .col((NetworkErrors::CreatedAt, IndexOrder::Desc))
+                    .to_owned(),
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_table(Table::drop().table(NetworkErrors::Table).to_owned())
+            .await
+    }
+}
+
+#[derive(DeriveIden)]
+pub enum NetworkErrors {
+    Table,
+    Id,
+    ProjectId,
+    AppId,
+    Url,
+    Method,
+    Status,
+    RequestHeaders,
+    RequestBody,
+    ResponseHeaders,
+    ResponseText,
+    Duration,
+    ErrorType,
+    UserAgent,
+    Browser,
+    Os,
+    Device,
+    SdkVersion,
+    Release,
+    Environment,
+    PageUrl,
+    DistinctId,
+    CreatedAt,
+}

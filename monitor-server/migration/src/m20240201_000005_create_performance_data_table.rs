@@ -1,0 +1,101 @@
+use sea_orm_migration::prelude::*;
+
+#[derive(DeriveMigrationName)]
+pub struct Migration;
+
+#[async_trait::async_trait]
+impl MigrationTrait for Migration {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .create_table(
+                Table::create()
+                    .table(PerformanceData::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(PerformanceData::Id)
+                            .big_integer()
+                            .not_null()
+                            .auto_increment()
+                            .primary_key(),
+                    )
+                    .col(ColumnDef::new(PerformanceData::ProjectId).integer().not_null())
+                    .col(ColumnDef::new(PerformanceData::AppId).string_len(32).not_null())
+                    .col(ColumnDef::new(PerformanceData::Url).string_len(500).null())
+                    .col(ColumnDef::new(PerformanceData::Fp).integer().null())
+                    .col(ColumnDef::new(PerformanceData::Fcp).integer().null())
+                    .col(ColumnDef::new(PerformanceData::Lcp).integer().null())
+                    .col(ColumnDef::new(PerformanceData::Cls).decimal_len(10, 4).null())
+                    .col(ColumnDef::new(PerformanceData::Ttfb).integer().null())
+                    .col(ColumnDef::new(PerformanceData::Fid).integer().null())
+                    .col(ColumnDef::new(PerformanceData::LoadTime).integer().null())
+                    .col(ColumnDef::new(PerformanceData::DnsTime).integer().null())
+                    .col(ColumnDef::new(PerformanceData::TcpTime).integer().null())
+                    .col(ColumnDef::new(PerformanceData::SslTime).integer().null())
+                    .col(ColumnDef::new(PerformanceData::DomParseTime).integer().null())
+                    .col(ColumnDef::new(PerformanceData::ResourceCount).integer().null())
+                    .col(ColumnDef::new(PerformanceData::ResourceSize).big_integer().null())
+                    .col(ColumnDef::new(PerformanceData::UserAgent).string_len(500).null())
+                    .col(ColumnDef::new(PerformanceData::Browser).string_len(50).null())
+                    .col(ColumnDef::new(PerformanceData::DeviceType).string_len(20).null())
+                    .col(ColumnDef::new(PerformanceData::SdkVersion).string_len(20).null())
+                    .col(ColumnDef::new(PerformanceData::Release).string_len(50).null())
+                    .col(ColumnDef::new(PerformanceData::Environment).string_len(20).null())
+                    .col(
+                        ColumnDef::new(PerformanceData::CreatedAt)
+                            .timestamp_with_time_zone()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_perf_project_time")
+                    .table(PerformanceData::Table)
+                    .col(PerformanceData::ProjectId)
+                    .col((PerformanceData::CreatedAt, IndexOrder::Desc))
+                    .to_owned(),
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_table(Table::drop().table(PerformanceData::Table).to_owned())
+            .await
+    }
+}
+
+#[derive(DeriveIden)]
+pub enum PerformanceData {
+    Table,
+    Id,
+    ProjectId,
+    AppId,
+    Url,
+    Fp,
+    Fcp,
+    Lcp,
+    Cls,
+    Ttfb,
+    Fid,
+    LoadTime,
+    DnsTime,
+    TcpTime,
+    SslTime,
+    DomParseTime,
+    ResourceCount,
+    ResourceSize,
+    UserAgent,
+    Browser,
+    DeviceType,
+    SdkVersion,
+    Release,
+    Environment,
+    CreatedAt,
+}

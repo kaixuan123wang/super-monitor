@@ -1,0 +1,316 @@
+//! 埋点相关表：track_events / track_user_profiles / track_id_mapping。
+
+use sea_orm_migration::prelude::*;
+
+#[derive(DeriveMigrationName)]
+pub struct Migration;
+
+#[async_trait::async_trait]
+impl MigrationTrait for Migration {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        // track_events
+        manager
+            .create_table(
+                Table::create()
+                    .table(TrackEvents::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(TrackEvents::Id)
+                            .big_integer()
+                            .not_null()
+                            .auto_increment()
+                            .primary_key(),
+                    )
+                    .col(ColumnDef::new(TrackEvents::ProjectId).integer().not_null())
+                    .col(ColumnDef::new(TrackEvents::AppId).string_len(32).not_null())
+                    .col(ColumnDef::new(TrackEvents::DistinctId).string_len(128).not_null())
+                    .col(ColumnDef::new(TrackEvents::AnonymousId).string_len(128).null())
+                    .col(ColumnDef::new(TrackEvents::UserId).string_len(128).null())
+                    .col(
+                        ColumnDef::new(TrackEvents::IsLoginId)
+                            .boolean()
+                            .not_null()
+                            .default(false),
+                    )
+                    .col(ColumnDef::new(TrackEvents::Event).string_len(128).not_null())
+                    .col(
+                        ColumnDef::new(TrackEvents::EventType)
+                            .string_len(20)
+                            .not_null()
+                            .default("custom"),
+                    )
+                    .col(ColumnDef::new(TrackEvents::Properties).json_binary().null())
+                    .col(ColumnDef::new(TrackEvents::SuperProperties).json_binary().null())
+                    .col(ColumnDef::new(TrackEvents::SessionId).string_len(64).null())
+                    .col(ColumnDef::new(TrackEvents::EventDuration).decimal_len(10, 3).null())
+                    .col(ColumnDef::new(TrackEvents::PageUrl).string_len(1000).null())
+                    .col(ColumnDef::new(TrackEvents::PageTitle).string_len(255).null())
+                    .col(ColumnDef::new(TrackEvents::Referrer).string_len(1000).null())
+                    .col(ColumnDef::new(TrackEvents::UserAgent).string_len(500).null())
+                    .col(ColumnDef::new(TrackEvents::Browser).string_len(50).null())
+                    .col(ColumnDef::new(TrackEvents::BrowserVersion).string_len(30).null())
+                    .col(ColumnDef::new(TrackEvents::Os).string_len(50).null())
+                    .col(ColumnDef::new(TrackEvents::OsVersion).string_len(30).null())
+                    .col(ColumnDef::new(TrackEvents::DeviceType).string_len(20).null())
+                    .col(ColumnDef::new(TrackEvents::Language).string_len(10).null())
+                    .col(ColumnDef::new(TrackEvents::Timezone).string_len(50).null())
+                    .col(ColumnDef::new(TrackEvents::SdkVersion).string_len(20).null())
+                    .col(ColumnDef::new(TrackEvents::Release).string_len(50).null())
+                    .col(ColumnDef::new(TrackEvents::Environment).string_len(20).null())
+                    .col(ColumnDef::new(TrackEvents::ClientTime).timestamp_with_time_zone().null())
+                    .col(
+                        ColumnDef::new(TrackEvents::CreatedAt)
+                            .timestamp_with_time_zone()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_track_events_project_time")
+                    .table(TrackEvents::Table)
+                    .col(TrackEvents::ProjectId)
+                    .col((TrackEvents::CreatedAt, IndexOrder::Desc))
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_track_events_distinct_id")
+                    .table(TrackEvents::Table)
+                    .col(TrackEvents::DistinctId)
+                    .col((TrackEvents::CreatedAt, IndexOrder::Desc))
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_track_events_event_name")
+                    .table(TrackEvents::Table)
+                    .col(TrackEvents::ProjectId)
+                    .col(TrackEvents::Event)
+                    .col((TrackEvents::CreatedAt, IndexOrder::Desc))
+                    .to_owned(),
+            )
+            .await?;
+
+        // track_user_profiles
+        manager
+            .create_table(
+                Table::create()
+                    .table(TrackUserProfiles::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(TrackUserProfiles::Id)
+                            .big_integer()
+                            .not_null()
+                            .auto_increment()
+                            .primary_key(),
+                    )
+                    .col(ColumnDef::new(TrackUserProfiles::ProjectId).integer().not_null())
+                    .col(
+                        ColumnDef::new(TrackUserProfiles::DistinctId)
+                            .string_len(128)
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(TrackUserProfiles::AnonymousId).string_len(128).null())
+                    .col(ColumnDef::new(TrackUserProfiles::UserId).string_len(128).null())
+                    .col(ColumnDef::new(TrackUserProfiles::Name).string_len(100).null())
+                    .col(ColumnDef::new(TrackUserProfiles::Email).string_len(200).null())
+                    .col(ColumnDef::new(TrackUserProfiles::Phone).string_len(20).null())
+                    .col(
+                        ColumnDef::new(TrackUserProfiles::Properties)
+                            .json_binary()
+                            .not_null()
+                            .default("{}"),
+                    )
+                    .col(
+                        ColumnDef::new(TrackUserProfiles::FirstVisitAt)
+                            .timestamp_with_time_zone()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(TrackUserProfiles::LastVisitAt)
+                            .timestamp_with_time_zone()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(TrackUserProfiles::TotalEvents)
+                            .integer()
+                            .not_null()
+                            .default(0),
+                    )
+                    .col(
+                        ColumnDef::new(TrackUserProfiles::TotalSessions)
+                            .integer()
+                            .not_null()
+                            .default(0),
+                    )
+                    .col(
+                        ColumnDef::new(TrackUserProfiles::CreatedAt)
+                            .timestamp_with_time_zone()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
+                    .col(
+                        ColumnDef::new(TrackUserProfiles::UpdatedAt)
+                            .timestamp_with_time_zone()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_track_profiles_unique")
+                    .table(TrackUserProfiles::Table)
+                    .col(TrackUserProfiles::ProjectId)
+                    .col(TrackUserProfiles::DistinctId)
+                    .unique()
+                    .to_owned(),
+            )
+            .await?;
+
+        // track_id_mapping
+        manager
+            .create_table(
+                Table::create()
+                    .table(TrackIdMapping::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(TrackIdMapping::Id)
+                            .big_integer()
+                            .not_null()
+                            .auto_increment()
+                            .primary_key(),
+                    )
+                    .col(ColumnDef::new(TrackIdMapping::ProjectId).integer().not_null())
+                    .col(
+                        ColumnDef::new(TrackIdMapping::AnonymousId)
+                            .string_len(128)
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(TrackIdMapping::LoginId).string_len(128).not_null())
+                    .col(
+                        ColumnDef::new(TrackIdMapping::MergedAt)
+                            .timestamp_with_time_zone()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_track_id_mapping_unique")
+                    .table(TrackIdMapping::Table)
+                    .col(TrackIdMapping::ProjectId)
+                    .col(TrackIdMapping::AnonymousId)
+                    .unique()
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_track_id_mapping_login")
+                    .table(TrackIdMapping::Table)
+                    .col(TrackIdMapping::ProjectId)
+                    .col(TrackIdMapping::LoginId)
+                    .to_owned(),
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_table(Table::drop().table(TrackIdMapping::Table).to_owned())
+            .await?;
+        manager
+            .drop_table(Table::drop().table(TrackUserProfiles::Table).to_owned())
+            .await?;
+        manager
+            .drop_table(Table::drop().table(TrackEvents::Table).to_owned())
+            .await
+    }
+}
+
+#[derive(DeriveIden)]
+pub enum TrackEvents {
+    Table,
+    Id,
+    ProjectId,
+    AppId,
+    DistinctId,
+    AnonymousId,
+    UserId,
+    IsLoginId,
+    Event,
+    EventType,
+    Properties,
+    SuperProperties,
+    SessionId,
+    EventDuration,
+    PageUrl,
+    PageTitle,
+    Referrer,
+    UserAgent,
+    Browser,
+    BrowserVersion,
+    Os,
+    OsVersion,
+    DeviceType,
+    Language,
+    Timezone,
+    SdkVersion,
+    Release,
+    Environment,
+    ClientTime,
+    CreatedAt,
+}
+
+#[derive(DeriveIden)]
+pub enum TrackUserProfiles {
+    Table,
+    Id,
+    ProjectId,
+    DistinctId,
+    AnonymousId,
+    UserId,
+    Name,
+    Email,
+    Phone,
+    Properties,
+    FirstVisitAt,
+    LastVisitAt,
+    TotalEvents,
+    TotalSessions,
+    CreatedAt,
+    UpdatedAt,
+}
+
+#[derive(DeriveIden)]
+pub enum TrackIdMapping {
+    Table,
+    Id,
+    ProjectId,
+    AnonymousId,
+    LoginId,
+    MergedAt,
+}

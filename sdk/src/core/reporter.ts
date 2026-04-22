@@ -1,11 +1,15 @@
 /**
  * 数据上报模块
  *
- * Phase 1: 提供最小可用的 POST 上报能力 + 批量 flush。
- * 后续阶段扩展：失败重试、sendBeacon、gzip、脱敏等。
+ * Phase 2：
+ * - P0 实时上报（fetch keepalive）
+ * - P1 批量上报（定时器 + 队列满触发）
+ * - 失败重试（简单指数退避，最多 retryMaxCount 次）
+ * - 通过 ReportContext 注入公共字段（url / ua / breadcrumb 等）
+ * - beforeunload / pagehide 时 flushSync（sendBeacon 降级）
  */
 
-import type { CollectPayload, MonitorConfig } from '../types';
+import type { CollectPayload, MonitorConfig, ReportContext } from '../types';
 import { Store } from './store';
 
 export interface ReporterOptions {
@@ -13,17 +17,23 @@ export interface ReporterOptions {
   appId: string;
   appKey: string;
   flushInterval: number;
+  retryMaxCount: number;
+  retryInterval: number;
   store: Store;
   debug?: boolean;
+  getContext?: () => ReportContext;
 }
 
 export class Reporter {
   private readonly endpoint: string;
   private readonly headers: Record<string, string>;
   private readonly flushInterval: number;
+  private readonly retryMaxCount: number;
+  private readonly retryInterval: number;
   private readonly store: Store;
   private timer: ReturnType<typeof setInterval> | null = null;
   private readonly debug: boolean;
+  private readonly getContext: () => ReportContext;
 
   constructor(options: ReporterOptions) {
     const base = options.server.replace(/\/$/, '');
@@ -34,8 +44,11 @@ export class Reporter {
       'X-App-Key': options.appKey,
     };
     this.flushInterval = options.flushInterval;
+    this.retryMaxCount = options.retryMaxCount;
+    this.retryInterval = options.retryInterval;
     this.store = options.store;
     this.debug = !!options.debug;
+    this.getContext = options.getContext || (() => ({}));
   }
 
   /** 启动定时批量上报 */
@@ -57,8 +70,16 @@ export class Reporter {
     }
   }
 
-  /** 加入队列 */
+  /**
+   * 统一的上报入口：
+   * - P0：立即发送（不入队）
+   * - P1：入队，等批量 flush
+   */
   report(payload: CollectPayload): void {
+    if (payload.priority === 'P0') {
+      this.sendImmediate(payload);
+      return;
+    }
     this.store.enqueue(payload);
   }
 
@@ -66,25 +87,14 @@ export class Reporter {
   async flush(): Promise<void> {
     const items = this.store.drain();
     if (items.length === 0) return;
-    try {
-      await fetch(this.endpoint, {
-        method: 'POST',
-        headers: this.headers,
-        body: JSON.stringify(items.length === 1 ? items[0] : { type: 'batch', data: items }),
-        keepalive: true,
-      });
-    } catch (e) {
-      if (this.debug && typeof console !== 'undefined') {
-        console.warn('[Monitor] flush failed', e);
-      }
-    }
+    await this.sendWithRetry(this.wrapBatch(items), 0);
   }
 
   /** 页面关闭时同步上报（sendBeacon 降级） */
   flushSync(): void {
     const items = this.store.drain();
     if (items.length === 0) return;
-    const body = JSON.stringify(items.length === 1 ? items[0] : { type: 'batch', data: items });
+    const body = JSON.stringify(this.wrapBatch(items));
     try {
       if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
         const blob = new Blob([body], { type: 'application/json' });
@@ -106,15 +116,74 @@ export class Reporter {
       /* ignore */
     }
   }
+
+  /** 将若干条数据包装为最终上报的 payload */
+  private wrapBatch(items: CollectPayload[]): CollectPayload | { type: 'batch'; data: CollectPayload[]; context: ReportContext } {
+    const context = this.getContext();
+    if (items.length === 1) {
+      const item = items[0];
+      return {
+        type: item.type,
+        data: Object.assign({ __context: context }, item.data as object),
+      } as CollectPayload;
+    }
+    return { type: 'batch', data: items, context };
+  }
+
+  /** 立即发送单条（P0 实时） */
+  private async sendImmediate(payload: CollectPayload): Promise<void> {
+    await this.sendWithRetry(
+      {
+        type: payload.type,
+        data: Object.assign({ __context: this.getContext() }, payload.data as object),
+      } as CollectPayload,
+      0
+    );
+  }
+
+  /** 带重试的发送 */
+  private async sendWithRetry(body: unknown, attempt: number): Promise<void> {
+    try {
+      const resp = await fetch(this.endpoint, {
+        method: 'POST',
+        headers: this.headers,
+        body: JSON.stringify(body),
+        keepalive: true,
+      });
+      if (!resp.ok && attempt < this.retryMaxCount) {
+        await this.delay(this.retryInterval * (attempt + 1));
+        return this.sendWithRetry(body, attempt + 1);
+      }
+    } catch (e) {
+      if (this.debug && typeof console !== 'undefined') {
+        console.warn('[Monitor] send failed', e);
+      }
+      if (attempt < this.retryMaxCount) {
+        await this.delay(this.retryInterval * (attempt + 1));
+        return this.sendWithRetry(body, attempt + 1);
+      }
+    }
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
 }
 
-export function buildReporterFromConfig(config: MonitorConfig, store: Store): Reporter {
+export function buildReporterFromConfig(
+  config: MonitorConfig,
+  store: Store,
+  getContext?: () => ReportContext
+): Reporter {
   return new Reporter({
     server: config.server,
     appId: config.appId,
     appKey: config.appKey,
     flushInterval: config.reporter?.flushInterval ?? 5000,
+    retryMaxCount: config.reporter?.retryMaxCount ?? 3,
+    retryInterval: config.reporter?.retryInterval ?? 30000,
     store,
     debug: config.debug,
+    getContext,
   });
 }

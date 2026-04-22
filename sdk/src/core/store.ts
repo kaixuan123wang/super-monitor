@@ -1,8 +1,8 @@
 /**
  * 本地缓存/队列
  *
- * Phase 1: 内存队列 + localStorage 降级。
- * Phase 2 起会扩展为 IndexedDB 持久化队列（失败补发 / FIFO）。
+ * Phase 2: 内存 FIFO 队列，超限时优先丢弃非 P0 的旧数据。
+ * 后续阶段会替换为 IndexedDB 持久化队列。
  */
 
 import type { CollectPayload } from '../types';
@@ -19,10 +19,16 @@ export class Store {
     this.maxQueueSize = options.maxQueueSize;
   }
 
-  /** 入队；超限时丢弃最旧的一条 */
+  /** 入队；超限时丢弃最旧的一条（优先丢弃非 P0） */
   enqueue(payload: CollectPayload): void {
     if (this.queue.length >= this.maxQueueSize) {
-      this.queue.shift();
+      // 优先丢弃最旧的非 P0 数据
+      const idx = this.queue.findIndex((p) => p.priority !== 'P0');
+      if (idx >= 0) {
+        this.queue.splice(idx, 1);
+      } else {
+        this.queue.shift();
+      }
     }
     this.queue.push(payload);
   }

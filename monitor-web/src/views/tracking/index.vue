@@ -1,10 +1,47 @@
 <script setup lang="ts">
-// 用户埋点模块（Phase 2/3/4/5 持续实现）
+import { useRoute, useRouter } from 'vue-router';
+import { computed } from 'vue';
+
+const route = useRoute();
+const router = useRouter();
+
+const tabs = [
+  { name: 'TrackEvents', path: '/tracking/events', label: '事件管理' },
+  { name: 'TrackAnalysis', path: '/tracking/analysis', label: '事件分析' },
+];
+
+const activeTab = computed(() => {
+  if (route.name === 'TrackEventDetail') return 'TrackEvents';
+  return String(route.name);
+});
 </script>
 
 <template>
-  <el-card shadow="never">
-    <template #header><span>用户埋点</span></template>
-    <el-empty description="Phase 2 起实现事件管理 / 分析 / 用户画像 / 调试" />
-  </el-card>
+  <div class="tracking-layout">
+    <el-tabs
+      :model-value="activeTab"
+      class="tracking-layout__tabs"
+      @tab-click="(tab) => router.push(tabs.find((t) => t.name === tab.paneName)?.path ?? '/tracking/events')"
+    >
+      <el-tab-pane
+        v-for="t in tabs"
+        :key="t.name"
+        :label="t.label"
+        :name="t.name"
+      />
+    </el-tabs>
+    <router-view />
+  </div>
 </template>
+
+<style scoped lang="scss">
+.tracking-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+
+  &__tabs {
+    margin-bottom: 16px;
+  }
+}
+</style>
