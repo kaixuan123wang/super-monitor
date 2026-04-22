@@ -1,0 +1,37 @@
+{
+  "name": "@js-monitor/sdk",
+  "version": "1.0.0",
+  "description": "JS Monitor SDK - 前端错误/性能/埋点监控",
+  "main": "build/sdk.umd.js",
+  "module": "build/sdk.esm.js",
+  "browser": "build/sdk.iife.js",
+  "types": "build/index.d.ts",
+  "files": [
+    "build",
+    "src"
+  ],
+  "scripts": {
+    "build": "rollup -c",
+    "dev": "rollup -c -w",
+    "clean": "rimraf build",
+    "type-check": "tsc --noEmit"
+  },
+  "keywords": [
+    "monitor",
+    "sdk",
+    "error-tracking",
+    "tracking",
+    "performance"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@rollup/plugin-node-resolve": "^15.2.3",
+    "@rollup/plugin-terser": "^0.4.4",
+    "@rollup/plugin-typescript": "^11.1.6",
+    "rimraf": "^5.0.5",
+    "rollup": "^4.9.6",
+    "tslib": "^2.6.2",
+    "typescript": "^5.3.3"
+  }
+}

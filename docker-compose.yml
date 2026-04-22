@@ -1,0 +1,42 @@
+version: '3.8'
+
+# Phase 1 开发环境：仅启动 PostgreSQL + Redis。
+# Phase 5 部署阶段会在此基础上加入 nginx / monitor-server / monitor-web。
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: js_monitor_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: monitor
+      POSTGRES_PASSWORD: monitor123
+      POSTGRES_DB: js_monitor_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U monitor -d js_monitor_dev"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: js_monitor_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:
+  redisdata:

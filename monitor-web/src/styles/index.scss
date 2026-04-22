@@ -1,0 +1,19 @@
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'PingFang SC',
+    'Microsoft YaHei', sans-serif;
+  background-color: var(--el-bg-color-page);
+  color: var(--el-text-color-primary);
+}
+
+a {
+  color: var(--el-color-primary);
+  text-decoration: none;
+}
