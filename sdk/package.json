@@ -1,5 +1,5 @@
 {
-  "name": "@js-monitor/sdk",
+  "name": "@wonderful-world/sdk",
   "version": "1.0.0",
   "description": "JS Monitor SDK - 前端错误/性能/埋点监控",
   "main": "build/sdk.umd.js",
@@ -8,7 +8,7 @@
   "types": "build/index.d.ts",
   "files": [
     "build",
-    "src"
+    "README.md"
   ],
   "scripts": {
     "build": "rollup -c",

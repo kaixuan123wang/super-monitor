@@ -1,10 +1,10 @@
 //! 埋点数据处理：写入 track_events / track_user_profiles。
 
 use chrono::{DateTime, FixedOffset, TimeZone, Utc};
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
-};
+use sea_orm::prelude::Decimal;
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use serde_json::{json, Value};
+use std::str::FromStr;
 
 use crate::error::{AppError, AppResult};
 use crate::models;
@@ -14,7 +14,9 @@ fn now_fixed() -> DateTime<FixedOffset> {
 }
 
 fn data_str(data: &Value, key: &str) -> Option<String> {
-    data.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
+    data.get(key)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 fn ctx_str(ctx: &Value, key: &str) -> Option<String> {
@@ -31,6 +33,23 @@ fn parse_client_time(data: &Value) -> Option<DateTime<FixedOffset>> {
         })
 }
 
+fn decimal_from_json(value: &Value) -> Option<Decimal> {
+    if let Some(n) = value.as_f64() {
+        return Decimal::from_str(&format!("{n:.3}")).ok();
+    }
+    value.as_str().and_then(|s| Decimal::from_str(s).ok())
+}
+
+fn event_duration(data: &Value) -> Option<Decimal> {
+    data.get("event_duration")
+        .and_then(decimal_from_json)
+        .or_else(|| {
+            data.get("properties")
+                .and_then(|v| v.get("$event_duration"))
+                .and_then(decimal_from_json)
+        })
+}
+
 /// 写入单条 track_events 记录。
 pub async fn save_track_event(
     db: &DatabaseConnection,
@@ -43,17 +62,25 @@ pub async fn save_track_event(
         .or_else(|| ctx_str(ctx, "distinct_id"))
         .ok_or_else(|| AppError::BadRequest("missing distinct_id".into()))?;
 
-    let event = data_str(data, "event")
-        .ok_or_else(|| AppError::BadRequest("missing event".into()))?;
+    let event =
+        data_str(data, "event").ok_or_else(|| AppError::BadRequest("missing event".into()))?;
 
     let is_login_id = data
         .get("is_login_id")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
     let anonymous_id = data_str(data, "anonymous_id");
-    let user_id = if is_login_id { Some(distinct_id.clone()) } else { None };
+    let user_id = if is_login_id {
+        Some(distinct_id.clone())
+    } else {
+        None
+    };
 
-    let event_type = if event.starts_with('$') { "auto" } else { "custom" };
+    let event_type = if event.starts_with('$') {
+        "auto"
+    } else {
+        "custom"
+    };
 
     let active = models::track_event::ActiveModel {
         id: sea_orm::NotSet,
@@ -68,10 +95,12 @@ pub async fn save_track_event(
         properties: Set(data.get("properties").cloned()),
         super_properties: Set(data.get("super_properties").cloned()),
         session_id: Set(session_id),
-        event_duration: Set(None),
+        event_duration: Set(event_duration(data)),
         page_url: Set(ctx_str(ctx, "url")),
         page_title: Set(ctx_str(ctx, "title")),
         referrer: Set(ctx_str(ctx, "referrer")),
+        viewport: Set(ctx_str(ctx, "viewport")),
+        screen_resolution: Set(ctx_str(ctx, "screen_resolution")),
         user_agent: Set(ctx_str(ctx, "user_agent")),
         browser: Set(ctx_str(ctx, "browser")),
         browser_version: Set(ctx_str(ctx, "browser_version")),
@@ -141,8 +170,16 @@ pub async fn save_profile(
                 id: sea_orm::NotSet,
                 project_id: Set(project.id),
                 distinct_id: Set(distinct_id.clone()),
-                anonymous_id: Set(if is_login_id { None } else { Some(distinct_id.clone()) }),
-                user_id: Set(if is_login_id { Some(distinct_id.clone()) } else { None }),
+                anonymous_id: Set(if is_login_id {
+                    None
+                } else {
+                    Some(distinct_id.clone())
+                }),
+                user_id: Set(if is_login_id {
+                    Some(distinct_id.clone())
+                } else {
+                    None
+                }),
                 name: Set(None),
                 email: Set(None),
                 phone: Set(None),

@@ -1,0 +1,249 @@
+use sea_orm_migration::prelude::*;
+
+#[derive(DeriveMigrationName)]
+pub struct Migration;
+
+#[async_trait::async_trait]
+impl MigrationTrait for Migration {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        // source_maps
+        manager
+            .create_table(
+                Table::create()
+                    .table(SourceMaps::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(SourceMaps::Id)
+                            .integer()
+                            .not_null()
+                            .auto_increment()
+                            .primary_key(),
+                    )
+                    .col(ColumnDef::new(SourceMaps::ProjectId).integer().not_null())
+                    .col(
+                        ColumnDef::new(SourceMaps::Release)
+                            .string_len(100)
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(SourceMaps::Filename)
+                            .string_len(500)
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(SourceMaps::FileSize).big_integer().null())
+                    .col(
+                        ColumnDef::new(SourceMaps::StoragePath)
+                            .string_len(1000)
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(SourceMaps::ContentHash)
+                            .string_len(64)
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(SourceMaps::UploadedAt)
+                            .timestamp_with_time_zone()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_source_maps_project_release")
+                    .table(SourceMaps::Table)
+                    .col(SourceMaps::ProjectId)
+                    .col(SourceMaps::Release)
+                    .to_owned(),
+            )
+            .await?;
+
+        // track_funnels
+        manager
+            .create_table(
+                Table::create()
+                    .table(TrackFunnels::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(TrackFunnels::Id)
+                            .integer()
+                            .not_null()
+                            .auto_increment()
+                            .primary_key(),
+                    )
+                    .col(ColumnDef::new(TrackFunnels::ProjectId).integer().not_null())
+                    .col(
+                        ColumnDef::new(TrackFunnels::Name)
+                            .string_len(200)
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(TrackFunnels::Description).text().null())
+                    .col(ColumnDef::new(TrackFunnels::Steps).json_binary().not_null())
+                    .col(
+                        ColumnDef::new(TrackFunnels::WindowMinutes)
+                            .integer()
+                            .not_null()
+                            .default(1440),
+                    )
+                    .col(ColumnDef::new(TrackFunnels::CreatedBy).integer().null())
+                    .col(
+                        ColumnDef::new(TrackFunnels::CreatedAt)
+                            .timestamp_with_time_zone()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
+                    .col(
+                        ColumnDef::new(TrackFunnels::UpdatedAt)
+                            .timestamp_with_time_zone()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_track_funnels_project")
+                    .table(TrackFunnels::Table)
+                    .col(TrackFunnels::ProjectId)
+                    .to_owned(),
+            )
+            .await?;
+
+        // track_retention_configs
+        manager
+            .create_table(
+                Table::create()
+                    .table(TrackRetentionConfigs::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(TrackRetentionConfigs::Id)
+                            .integer()
+                            .not_null()
+                            .auto_increment()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(TrackRetentionConfigs::ProjectId)
+                            .integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(TrackRetentionConfigs::Name)
+                            .string_len(200)
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(TrackRetentionConfigs::InitialEvent)
+                            .string_len(128)
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(TrackRetentionConfigs::ReturnEvent)
+                            .string_len(128)
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(TrackRetentionConfigs::InitialFilters)
+                            .json_binary()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(TrackRetentionConfigs::ReturnFilters)
+                            .json_binary()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(TrackRetentionConfigs::RetentionDays)
+                            .integer()
+                            .not_null()
+                            .default(7),
+                    )
+                    .col(
+                        ColumnDef::new(TrackRetentionConfigs::CreatedBy)
+                            .integer()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(TrackRetentionConfigs::CreatedAt)
+                            .timestamp_with_time_zone()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_track_retention_project")
+                    .table(TrackRetentionConfigs::Table)
+                    .col(TrackRetentionConfigs::ProjectId)
+                    .to_owned(),
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_table(Table::drop().table(TrackRetentionConfigs::Table).to_owned())
+            .await?;
+        manager
+            .drop_table(Table::drop().table(TrackFunnels::Table).to_owned())
+            .await?;
+        manager
+            .drop_table(Table::drop().table(SourceMaps::Table).to_owned())
+            .await
+    }
+}
+
+#[derive(Iden)]
+enum SourceMaps {
+    Table,
+    Id,
+    ProjectId,
+    Release,
+    Filename,
+    FileSize,
+    StoragePath,
+    ContentHash,
+    UploadedAt,
+}
+
+#[derive(Iden)]
+enum TrackFunnels {
+    Table,
+    Id,
+    ProjectId,
+    Name,
+    Description,
+    Steps,
+    WindowMinutes,
+    CreatedBy,
+    CreatedAt,
+    UpdatedAt,
+}
+
+#[derive(Iden)]
+enum TrackRetentionConfigs {
+    Table,
+    Id,
+    ProjectId,
+    Name,
+    InitialEvent,
+    ReturnEvent,
+    InitialFilters,
+    ReturnFilters,
+    RetentionDays,
+    CreatedBy,
+    CreatedAt,
+}

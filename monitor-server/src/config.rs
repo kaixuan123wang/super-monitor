@@ -8,6 +8,14 @@ pub struct Config {
     pub jwt_secret: String,
     #[serde(default)]
     pub ai_api_key: String,
+    #[serde(default = "default_ai_api_base")]
+    pub ai_api_base: String,
+    #[serde(default = "default_ai_model")]
+    pub ai_model: String,
+    #[serde(default = "default_ai_enabled")]
+    pub ai_enabled: bool,
+    #[serde(default = "default_sourcemap_dir")]
+    pub sourcemap_dir: String,
     #[serde(default = "default_server_port")]
     pub server_port: u16,
     #[serde(default = "default_sse_port")]
@@ -17,9 +25,20 @@ pub struct Config {
 fn default_server_port() -> u16 {
     8080
 }
-
 fn default_sse_port() -> u16 {
     8081
+}
+fn default_ai_api_base() -> String {
+    "https://api.deepseek.com/v1".into()
+}
+fn default_ai_model() -> String {
+    "deepseek-chat".into()
+}
+fn default_ai_enabled() -> bool {
+    true
+}
+fn default_sourcemap_dir() -> String {
+    "./data/sourcemaps".into()
 }
 
 impl Config {

@@ -172,8 +172,14 @@ export interface ReportContext {
   release?: string;
   environment?: string;
   url?: string;
+  title?: string;
   referrer?: string;
   user_agent?: string;
+  browser?: string;
+  browser_version?: string;
+  os?: string;
+  os_version?: string;
+  device_type?: string;
   language?: string;
   timezone?: string;
   viewport?: string;
@@ -181,4 +187,5 @@ export interface ReportContext {
   breadcrumb?: BreadcrumbItem[];
   distinct_id?: string;
   anonymous_id?: string;
+  is_login_id?: boolean;
 }

@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-构建一个完整的 JS 监控平台，包含 **脚本端 SDK**（可注入任意网站/Chrome 插件）和 **监控端管理系统**（Vue3 + Vite + Rust），实现前端错误监控、接口监控、AI 智能分析、实时告警等功能。
+构建一个完整的 JS 监控平台，包含 **脚本端 SDK**（可注入任意网站）和 **监控端管理系统**（Vue3 + Vite + Rust），实现前端错误监控、接口监控、AI 智能分析、实时告警和前端埋点信息采集等功能。
 
 ---
 
@@ -107,12 +107,6 @@ js-monitor-platform/
 │   ├── migrations/               # SeaORM 数据库迁移
 │   ├── Cargo.toml
 │   └── Dockerfile
-│
-├── chrome-extension/             # Chrome 插件端
-│   ├── manifest.json
-│   ├── popup/                    # 插件弹窗（复用 Vue3 组件）
-│   ├── content-script.ts         # 注入 SDK 到页面
-│   └── background.ts             # 后台服务
 │
 ├── docker-compose.yml            # 一键部署（Rust + PostgreSQL + Redis）
 └── README.md
@@ -1029,54 +1023,9 @@ pub async fn resolve_stacktrace(
 
 ---
 
-## 九、Chrome 插件设计
+## 九、权限模型
 
-### 9.1 功能规划
-
-| 组件 | 功能 |
-|------|------|
-| content-script | 页面加载时自动注入 SDK，监听页面错误 |
-| popup | 迷你监控面板，显示当前页面：错误数、性能指标、最近错误列表 |
-| background | 监听浏览器错误事件，管理跨页面状态 |
-
-### 9.2 通信流程
-
-```
-页面 JS 错误 → content-script 捕获 → background 聚合
-                                    ↓
-                              popup 打开时请求数据
-                                    ↓
-                              调用监控端 API 获取项目信息
-```
-
-### 9.3 插件配置
-
-```json
-{
-  "manifest_version": 3,
-  "name": "JS Monitor",
-  "version": "1.0.0",
-  "permissions": ["activeTab", "storage"],
-  "host_permissions": ["<all_urls>"],
-  "content_scripts": [{
-    "matches": ["<all_urls>"],
-    "js": ["content-script.js"],
-    "run_at": "document_start"
-  }],
-  "action": {
-    "default_popup": "popup/index.html"
-  },
-  "background": {
-    "service_worker": "background.js"
-  }
-}
-```
-
----
-
-## 十、权限模型
-
-### 10.1 角色定义
+### 9.1 角色定义
 
 | 角色 | 权限范围 | 说明 |
 |------|---------|------|
@@ -1366,14 +1315,6 @@ URL: {url}
 3. 后端收到错误后，根据 `release` 匹配对应的 Source Map
 4. 使用 `sourcemap` crate 解析堆栈，定位到原始源码位置
 5. AI 分析时传入解析后的堆栈和源码片段
-
----
-
-## 十五、Chrome 插件设计
-
-- **content-script**：页面加载时自动注入 SDK
-- **popup**：迷你监控面板，显示当前页面报错数（调用监控端 API）
-- **background**：监听浏览器错误事件（如扩展本身报错）
 
 ---
 
@@ -2209,13 +2150,11 @@ Level 3 - 用户属性：
 6. **埋点分析**：留存分析（cohort 热力矩阵 + 曲线图）
 7. **埋点调试**：实时事件流 Debug 页面（SSE 推送）
 
-### Phase 5：管理功能
-1. 用户注册/登录/权限
-2. 分组管理
-3. Chrome 插件
-4. 系统优化与压测
-5. **埋点用户画像**：用户列表（属性筛选）+ 用户详情（事件时间线）
-6. **埋点曝光追踪**：SDK 实现 `exposure.ts`（IntersectionObserver 半自动曝光）
+### Phase 5：前端埋点信息采集
+1. **SDK 自动采集增强**：完善页面浏览、点击、离开事件的上下文信息
+2. **埋点曝光追踪**：SDK 实现 `exposure.ts`（IntersectionObserver 半自动曝光）
+3. **用户身份与属性采集**：支持 identify / profile / track_signup 数据闭环
+4. **埋点用户画像**：用户列表（属性筛选）+ 用户详情（事件时间线）
 
 ---
 
@@ -2231,7 +2170,7 @@ Level 3 - 用户属性：
 8. **SSE 推送范围**：用户登录后推送其所有有权限项目的告警
 9. **埋点 API 风格**：参考 Mixpanel/Amplitude 现代设计（track / identify / setUserProperties），兼容 Sensors Data 用户关联体系
 10. **全埋点策略**：自动采集 $page_view / $element_click / $page_leave，可通过初始化配置单独开关
-11. **埋点与监控共用 SDK**：埋点功能作为插件集成到现有 JS 监控 SDK 中，共用上报通道和队列
+11. **埋点与监控共用 SDK**：埋点功能作为 SDK 内置模块集成到现有 JS 监控 SDK 中，共用上报通道和队列
 12. **用户身份**：采用简易 IDM（匿名 ID → 登录 ID 关联），不实现复杂的全域 ID 合并
 
 ---
@@ -2244,4 +2183,4 @@ Level 3 - 用户属性：
 | Phase 2 | 核心监控：SDK 采集上报 + 后端存储 + 前端项目/错误列表 + **埋点核心 API + track_events 表** | ~60 |
 | Phase 3 | 数据可视化：ECharts 仪表盘 + SSE 实时推送 + **全埋点采集 + 埋点管理平台 + 事件分析页** | ~45 |
 | Phase 4 | AI 与告警：Source Map 上传/解析 + AI 分析 + 告警规则 + **漏斗分析 + 留存分析 + 实时事件流** | ~50 |
-| Phase 5 | 管理功能：用户/分组/权限 + Chrome 插件 + 部署配置 + **用户画像 + 曝光追踪** | ~40 |
+| Phase 5 | 前端埋点信息采集：**用户画像 + 曝光追踪 + 采集闭环** | ~25 |

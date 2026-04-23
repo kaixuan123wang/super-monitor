@@ -4,15 +4,15 @@ JS 监控平台后端（Rust + Axum + SeaORM + PostgreSQL + Redis）。
 
 ## 开发启动
 
-1. 启动 PostgreSQL / Redis（项目根目录）：
+1. 启动完整开发栈（项目根目录）：
    ```bash
-   docker compose -f ../docker-compose.yml up -d postgres redis
+   docker compose -f ../docker-compose.yml up -d
    ```
 2. 复制环境变量：
    ```bash
    cp .env.example .env
    ```
-3. 执行数据库迁移（首次运行）：
+3. 如只本地运行后端，可手动执行数据库迁移：
    ```bash
    cargo run -p migration -- up
    ```

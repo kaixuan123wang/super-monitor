@@ -2,12 +2,15 @@
 import { computed, onMounted, onUnmounted, watch, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useProjectStore } from '@/stores/project';
+import { useUserStore } from '@/stores/user';
 import { SSEClient } from '@/utils/sse';
-import { ElNotification } from 'element-plus';
+import { ElNotification, ElMessageBox } from 'element-plus';
+import { ArrowDown } from '@element-plus/icons-vue';
 
 const route = useRoute();
 const router = useRouter();
 const projectStore = useProjectStore();
+const userStore = useUserStore();
 
 const menuRoutes = computed(() => {
   const root = router.options.routes.find((r) => r.path === '/');
@@ -75,6 +78,20 @@ watch(
     }
   }
 );
+
+async function handleLogout() {
+  try {
+    await ElMessageBox.confirm('确定要退出登录吗？', '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning',
+    });
+    userStore.reset();
+    router.replace('/login');
+  } catch {
+    // 用户取消
+  }
+}
 </script>
 
 <template>
@@ -89,13 +106,29 @@ watch(
         text-color="#e6e9ef"
         active-text-color="#409eff"
       >
-        <el-menu-item
-          v-for="item in menuRoutes"
-          :key="item.path"
-          :index="`/${item.path}`"
-        >
-          <span>{{ item.meta?.title ?? item.name }}</span>
-        </el-menu-item>
+        <template v-for="item in menuRoutes" :key="item.path">
+          <el-sub-menu
+            v-if="item.children && item.children.length"
+            :index="`/${item.path}`"
+          >
+            <template #title>
+              <span>{{ item.meta?.title ?? item.name }}</span>
+            </template>
+            <el-menu-item
+              v-for="sub in item.children"
+              :key="sub.path"
+              :index="`/${item.path}/${sub.path}`"
+            >
+              {{ sub.meta?.title ?? sub.name }}
+            </el-menu-item>
+          </el-sub-menu>
+          <el-menu-item
+            v-else
+            :index="`/${item.path}`"
+          >
+            <span>{{ item.meta?.title ?? item.name }}</span>
+          </el-menu-item>
+        </template>
       </el-menu>
     </el-aside>
     <el-container>
@@ -125,6 +158,18 @@ watch(
           <el-button v-else type="primary" size="small" @click="router.push('/projects')">
             新建项目
           </el-button>
+
+          <el-dropdown v-if="userStore.user" @command="handleLogout">
+            <span class="user-info">
+              {{ userStore.user.username }}
+              <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item>退出登录</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </el-header>
       <el-main class="basic-layout__main">
@@ -197,6 +242,19 @@ watch(
   &--on {
     background: #67c23a;
     box-shadow: 0 0 4px #67c23a;
+  }
+}
+
+.user-info {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--el-text-color-primary);
+  font-size: 14px;
+  margin-left: 4px;
+
+  &:hover {
+    color: var(--el-color-primary);
   }
 }
 </style>

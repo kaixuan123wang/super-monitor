@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 
 export interface CurrentUser {
   id: number;
@@ -9,10 +9,11 @@ export interface CurrentUser {
   group_id?: number;
 }
 
-/** 当前登录用户状态（Phase 2 接入登录后填充） */
 export const useUserStore = defineStore('user', () => {
-  const token = ref<string>('');
+  const token = ref<string>(localStorage.getItem('__monitor_access_token') ?? '');
   const user = ref<CurrentUser | null>(null);
+
+  const isLoggedIn = computed(() => !!token.value);
 
   function setToken(t: string) {
     token.value = t;
@@ -25,7 +26,9 @@ export const useUserStore = defineStore('user', () => {
   function reset() {
     token.value = '';
     user.value = null;
+    localStorage.removeItem('__monitor_access_token');
+    localStorage.removeItem('__monitor_refresh_token');
   }
 
-  return { token, user, setToken, setUser, reset };
+  return { token, user, isLoggedIn, setToken, setUser, reset };
 });

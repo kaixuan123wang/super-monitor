@@ -1,5 +1,6 @@
 import axios, { type AxiosInstance, type AxiosRequestConfig } from 'axios';
 import { ElMessage } from 'element-plus';
+import router from '@/router';
 
 export interface ApiResponse<T = unknown> {
   code: number;
@@ -19,14 +20,28 @@ const request: AxiosInstance = axios.create({
 });
 
 request.interceptors.request.use((config) => {
-  // Phase 2 起注入 Authorization: Bearer <access_token>
+  const token = localStorage.getItem('__monitor_access_token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
   return config;
 });
+
+function handleUnauthorized() {
+  localStorage.removeItem('__monitor_access_token');
+  localStorage.removeItem('__monitor_refresh_token');
+  if (router.currentRoute.value.path !== '/login') {
+    router.replace('/login');
+  }
+}
 
 request.interceptors.response.use(
   (response) => {
     const body = response.data as ApiResponse;
     if (body && body.code !== undefined && body.code !== 0) {
+      if (body.code === 401) {
+        handleUnauthorized();
+      }
       ElMessage.error(body.message || '请求失败');
       return Promise.reject(body);
     }
@@ -34,10 +49,11 @@ request.interceptors.response.use(
   },
   (error) => {
     const status = error?.response?.status;
-    if (status === 401) {
-      // Phase 2 起接入刷新 token / 跳转登录
+    const body = error?.response?.data as ApiResponse | undefined;
+    if (status === 401 || body?.code === 401) {
+      handleUnauthorized();
     }
-    ElMessage.error(error?.response?.data?.message || error.message || '网络错误');
+    ElMessage.error(body?.message || error.message || '网络错误');
     return Promise.reject(error);
   }
 );

@@ -6,7 +6,7 @@
  * - P1 批量上报（定时器 + 队列满触发）
  * - 失败重试（简单指数退避，最多 retryMaxCount 次）
  * - 通过 ReportContext 注入公共字段（url / ua / breadcrumb 等）
- * - beforeunload / pagehide 时 flushSync（sendBeacon 降级）
+ * - beforeunload / pagehide 时 flushSync（fetch keepalive + 同步 XHR 降级）
  */
 
 import type { CollectPayload, MonitorConfig, ReportContext } from '../types';
@@ -90,15 +90,19 @@ export class Reporter {
     await this.sendWithRetry(this.wrapBatch(items), 0);
   }
 
-  /** 页面关闭时同步上报（sendBeacon 降级） */
+  /** 页面关闭时尽量同步上报 */
   flushSync(): void {
     const items = this.store.drain();
     if (items.length === 0) return;
     const body = JSON.stringify(this.wrapBatch(items));
     try {
-      if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
-        const blob = new Blob([body], { type: 'application/json' });
-        navigator.sendBeacon(this.endpoint, blob);
+      if (typeof fetch === 'function') {
+        fetch(this.endpoint, {
+          method: 'POST',
+          headers: this.headers,
+          body,
+          keepalive: true,
+        });
         return;
       }
     } catch {

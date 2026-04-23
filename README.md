@@ -2,7 +2,7 @@
 
 一个完整的 JS 监控平台，包含：
 
-- **脚本端 SDK**（原生 TypeScript，零依赖，浏览器 / Chrome 插件注入）
+- **脚本端 SDK**（原生 TypeScript，零依赖，可注入任意网站）
 - **监控端前端**（Vue 3 + Vite + Element Plus）
 - **监控端后端**（Rust + Axum + SeaORM + PostgreSQL + Redis）
 
@@ -66,9 +66,9 @@ pnpm build                            # 输出 build/sdk.{umd,esm,iife}.js
 | 阶段 | 内容 | 状态 |
 |------|------|------|
 | Phase 1 | 基础框架搭建 | ✅ |
-| Phase 2 | 核心监控 + 埋点核心 API | ⬜ |
-| Phase 3 | 数据可视化 + 全埋点 + 事件分析 | ⬜ |
-| Phase 4 | AI + 告警 + 漏斗 / 留存分析 | ⬜ |
-| Phase 5 | 权限 / 用户 / Chrome 插件 / 部署 | ⬜ |
+| Phase 2 | 核心监控 + 埋点核心 API | ✅ |
+| Phase 3 | 数据可视化 + 全埋点 + 事件分析 | ✅ |
+| Phase 4 | AI + 告警 + 漏斗 / 留存分析 | ✅ |
+| Phase 5 | 前端埋点信息采集 / 用户画像 / 曝光追踪 | ✅ |
 
 详见 `docs/phaseX.md`。

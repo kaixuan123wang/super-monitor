@@ -1,246 +1,169 @@
-# Phase 5：管理功能
+# Phase 5：前端埋点信息采集
 
 ## 目标
 
-1. 用户注册/登录/权限
-2. 分组管理
-3. Chrome 插件
-4. 系统优化与压测
-5. **埋点用户画像**：用户列表（属性筛选）+ 用户详情（事件时间线）
-6. **埋点曝光追踪**：SDK 实现 `exposure.ts`（IntersectionObserver 半自动曝光）
+本阶段不扩展用户/分组/权限体系，重点收敛到前端埋点数据的采集、入库与查询闭环。
+
+1. **SDK 自动采集增强**：完善 `$page_view` / `$element_click` / `$page_leave` 的上下文信息。
+2. **埋点曝光追踪**：实现 `exposure.ts`，支持 `IntersectionObserver` 半自动曝光采集。
+3. **用户身份与属性采集**：继续支持 `identify` / `track_signup` / `setUserProperties` / `appendUserProperties`。
+4. **后端埋点入库**：确保 `track` / `track_batch` / `profile` / `track_signup` 写入对应表。
+5. **用户画像查询**：支持按属性筛选用户，并查看用户事件时间线。
 
 ---
 
-## 5.1 用户认证与权限
+## 5.1 SDK 采集能力
 
-### 5.1.1 认证接口
+### 5.1.1 自动事件
 
-```
-POST /api/auth/login              # 登录
-  Body: { email, password }
-  Response: { access_token, refresh_token, expires_in, user }
+SDK 初始化后可根据 `tracking.autoTrack` 开关自动采集：
 
-POST /api/auth/register           # 注册（需分组邀请码或创建新分组）
-  Body: { username, email, password, group_invite_code? }
-  Response: { access_token, refresh_token, user }
-
-POST /api/auth/refresh            # 刷新 Token
-  Headers: Authorization: Bearer {refresh_token}
-  Response: { access_token, expires_in }
-
-GET  /api/auth/me                 # 当前用户信息
-  Response: { id, username, email, role, group_id, permissions }
-
-POST /api/auth/logout             # 登出（使 refresh_token 失效）
-```
-
-**Token 机制**：
-- Access Token：JWT，有效期 2 小时，存内存
-- Refresh Token：JWT，有效期 7 天，存 httpOnly cookie
-- 前端 Axios 拦截器自动刷新 access_token
-
-### 5.1.2 用户管理 API
-
-```
-GET  /api/users                   # 用户列表（super_admin / admin 可查看全部）
-  Query: page, page_size, group_id, role, keyword
-POST /api/users                   # 创建用户（admin 以上）
-PUT  /api/users/:id               # 更新用户信息/角色
-DELETE /api/users/:id             # 删除用户（super_admin）
-```
-
-### 5.1.3 分组管理 API
-
-```
-GET  /api/groups                  # 分组列表
-POST /api/groups                  # 创建分组
-GET  /api/groups/:id              # 分组详情（含成员列表）
-PUT  /api/groups/:id              # 更新分组
-DELETE /api/groups/:id            # 删除分组（需无项目）
-GET  /api/groups/:id/invite-code  # 获取邀请码
-POST /api/groups/:id/join         # 通过邀请码加入分组
-```
-
----
-
-## 5.2 权限模型
-
-### 5.2.1 角色定义
-
-| 角色 | 权限范围 | 说明 |
-|------|---------|------|
-| **super_admin** | 全系统管理 | 创建/删除分组，管理所有用户，系统配置 |
-| **admin** | 分组级管理 | 创建项目，管理分组成员，查看分组所有项目 |
-| **owner** | 项目级管理 | 项目 Owner，可修改项目设置、添加成员、配置告警 |
-| **member** | 项目级读写 | 查看错误、触发 AI 分析、创建告警规则 |
-| **readonly** | 项目级只读 | 仅查看错误和统计数据，不可修改任何配置 |
-
-### 5.2.2 权限矩阵
-
-| 操作 | super_admin | admin | owner | member | readonly |
-|------|:-----------:|:-----:|:-----:|:------:|:--------:|
-| 创建分组 | ✅ | ❌ | ❌ | ❌ | ❌ |
-| 删除分组 | ✅ | ❌ | ❌ | ❌ | ❌ |
-| 创建项目 | ✅ | ✅ | ❌ | ❌ | ❌ |
-| 删除项目 | ✅ | ✅ | ✅ | ❌ | ❌ |
-| 修改项目设置 | ✅ | ✅ | ✅ | ❌ | ❌ |
-| 添加项目成员 | ✅ | ✅ | ✅ | ❌ | ❌ |
-| 查看错误列表 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 触发 AI 分析 | ✅ | ✅ | ✅ | ✅ | ❌ |
-| 创建告警规则 | ✅ | ✅ | ✅ | ✅ | ❌ |
-| 上传 Source Map | ✅ | ✅ | ✅ | ✅ | ❌ |
-| 查看用户列表 | ✅ | ✅ | ❌ | ❌ | ❌ |
-| 修改用户角色 | ✅ | ✅ | ❌ | ❌ | ❌ |
-
-### 5.2.3 权限校验中间件
-
-```rust
-async fn require_role(
-    role: Role,
-) -> impl Fn(Request, Next) -> Response {
-    move |req, next| {
-        let user = req.extensions().get::<CurrentUser>().unwrap();
-        if user.role.level() < role.level() {
-            return StatusCode::FORBIDDEN.into_response();
-        }
-        next.run(req).await
-    }
-}
-
-// 路由使用
-let project_routes = Router::new()
-    .route("/", post(create_project))
-    .layer(middleware::from_fn(require_role(Role::Admin)))
-    .route("/:id", put(update_project))
-    .layer(middleware::from_fn(require_project_owner));
-```
-
----
-
-## 5.3 Chrome 插件
-
-### 5.3.1 功能规划
-
-| 组件 | 功能 |
-|------|------|
-| content-script | 页面加载时自动注入 SDK，监听页面错误 |
-| popup | 迷你监控面板，显示当前页面：错误数、性能指标、最近错误列表 |
-| background | 监听浏览器错误事件，管理跨页面状态 |
-
-### 5.3.2 通信流程
-
-```
-页面 JS 错误 → content-script 捕获 → background 聚合
-                                    ↓
-                              popup 打开时请求数据
-                                    ↓
-                              调用监控端 API 获取项目信息
-```
-
-### 5.3.3 插件配置
-
-```json
-{
-  "manifest_version": 3,
-  "name": "JS Monitor",
-  "version": "1.0.0",
-  "permissions": ["activeTab", "storage"],
-  "host_permissions": ["<all_urls>"],
-  "content_scripts": [{
-    "matches": ["<all_urls>"],
-    "js": ["content-script.js"],
-    "run_at": "document_start"
-  }],
-  "action": {
-    "default_popup": "popup/index.html"
+```typescript
+Monitor.init({
+  appId: 'app_xxx',
+  appKey: 'key_xxx',
+  server: 'https://monitor.example.com',
+  tracking: {
+    enableTracking: true,
+    autoTrack: {
+      pageView: true,
+      click: true,
+      pageLeave: true,
+      exposure: true,
+    },
   },
-  "background": {
-    "service_worker": "background.js"
-  }
-}
+});
 ```
+
+自动事件：
+
+- `$page_view`：页面浏览。
+- `$element_click`：元素点击。
+- `$page_leave`：页面离开与停留时长。
+- 自定义曝光事件：由元素上的 `data-track-event` 决定。
+
+### 5.1.2 通用上下文
+
+每条埋点事件都应携带：
+
+- `distinct_id` / `anonymous_id` / `is_login_id`
+- 页面 URL、标题、referrer
+- viewport、screen、language、timezone
+- browser、browser_version、os、os_version、device_type
+- release、environment、sdk_version
+- 已注册的超级属性
 
 ---
 
-## 5.4 埋点用户画像
+## 5.2 埋点曝光追踪
 
-### 5.4.1 用户列表页
-
-功能：
-- 左侧筛选面板：按用户属性筛选（城市=北京，membership=premium 等）
-- 右侧用户列表：显示 distinct_id、最后访问时间、事件数等
-- 点击进入用户详情
-
-### 5.4.2 用户详情页
-
-功能：
-- 属性面板：展示用户所有属性
-- 事件时间线：按时间倒序展示用户行为流水
-
-### 5.4.3 用户画像 API
-
-```
-GET    /api/tracking/users                   # 用户列表（含属性筛选）
-  Query: project_id, page, filters（JSON 序列化的筛选条件）
-GET    /api/tracking/users/:distinct_id      # 用户详情（属性 + 最近事件流水）
-GET    /api/tracking/users/:distinct_id/events  # 用户事件时间线
-  Query: page, event_name, start_time, end_time
-```
-
----
-
-## 5.5 埋点曝光追踪
-
-### 5.5.1 半自动曝光采集
+### 5.2.1 半自动曝光采集
 
 ```html
-<!-- 标记需要追踪曝光的元素 -->
 <div
   data-track-imp="true"
   data-track-event="product_exposure"
-  data-track-attrs='{"product_id": "sku_001", "position": 3, "list": "首页推荐"}'
+  data-track-attrs='{"product_id": "sku_001", "position": 3, "list": "home_recommend"}'
+  data-track-mode="once"
 >
   商品卡片内容
 </div>
 ```
 
-### 5.5.2 SDK 实现
+字段约定：
 
-- 使用 IntersectionObserver 监听元素可见性
-- 当元素从不可见→可见时，自动发送 data-track-event 指定的埋点事件
-- 支持 once 模式（只触发一次）和 always 模式（每次出现都触发）
-
----
-
-## 5.6 系统优化与压测
-
-### 5.6.1 性能优化点
-
-| 优化项 | 措施 |
-|--------|------|
-| 数据库查询 | 预聚合统计表 + 合理索引 |
-| 接口响应 | Redis 缓存热点数据 |
-| SDK 上报 | 批量 + 采样 + 本地队列 |
-| 前端渲染 | ECharts 虚拟滚动（大数据量） |
-| AI 分析 | 异步队列 + 缓存 |
-
-### 5.6.2 压测指标
-
-| 指标 | 目标 |
+| 属性 | 说明 |
 |------|------|
-| SDK 上报接口 QPS | 5000+ |
-| 查询接口 P99 延迟 | < 200ms |
-| 仪表盘加载时间 | < 2s |
-| AI 分析平均耗时 | < 10s |
+| `data-track-imp` | 标记元素需要采集曝光，值为 `true` 时启用 |
+| `data-track-event` | 曝光事件名，未提供时默认 `$element_exposure` |
+| `data-track-attrs` | JSON 字符串，作为业务属性合入事件属性 |
+| `data-track-mode` | `once` 只触发一次，`always` 每次重新进入视口都触发 |
+
+### 5.2.2 SDK 实现要求
+
+- 使用 `IntersectionObserver` 监听进入/离开视口。
+- 默认阈值为 0.5，可由 SDK 内部配置扩展。
+- 触发事件时补充元素基础信息：
+  - `$element_id`
+  - `$element_class`
+  - `$element_type`
+  - `$element_content`
+  - `$element_path`
+  - `$page_url`
+  - `$viewport_width`
+  - `$viewport_height`
+  - `$exposure_ratio`
+- 支持 DOM 动态新增元素，使用 `MutationObserver` 追加监听。
 
 ---
 
-## 5.7 本阶段验收标准
+## 5.3 上报与入库
 
-- [ ] 用户能注册、登录、登出
-- [ ] 权限中间件能正确拦截越权操作
-- [ ] 分组管理能创建、邀请、加入
-- [ ] Chrome 插件能显示当前页面错误和性能指标
-- [ ] 用户画像能筛选用户并查看事件时间线
-- [ ] 曝光追踪能正确触发 IntersectionObserver 事件
-- [ ] 系统能承受目标 QPS 压力
+SDK 继续使用统一上报接口：
+
+```http
+POST /api/v1/collect
+Headers:
+  X-App-Id: {app_id}
+  X-App-Key: {app_key}
+Body:
+  { "type": "track", "data": { ... } }
+```
+
+后端分发规则：
+
+| type | 目标 |
+|------|------|
+| `track` | 写入 `track_events`，并更新 `track_user_profiles.total_events` |
+| `track_batch` | 批量写入 `track_events` |
+| `profile` | 更新 `track_user_profiles.properties` |
+| `track_signup` | 写入 `track_id_mapping`，关联匿名 ID 与登录 ID |
+
+---
+
+## 5.4 用户画像查询
+
+### 5.4.1 API
+
+```http
+GET /api/tracking/users
+Query: project_id, page, page_size, keyword, filters
+
+GET /api/tracking/users/:distinct_id
+Query: project_id
+
+GET /api/tracking/users/:distinct_id/events
+Query: project_id, page, page_size, event_name, start_time, end_time
+```
+
+`filters` 使用 JSON 序列化数组：
+
+```json
+[
+  { "property": "city", "operator": "eq", "value": "Beijing" },
+  { "property": "membership", "operator": "eq", "value": "premium" }
+]
+```
+
+### 5.4.2 管理端页面
+
+用户画像页面提供：
+
+- 项目选择。
+- 关键字搜索：`distinct_id` / `user_id` / `name` / `email`。
+- 属性筛选：按用户属性做等值或包含筛选。
+- 用户列表：展示 `distinct_id`、最后访问时间、事件数、核心属性。
+- 用户详情：展示用户属性和最近事件时间线。
+
+---
+
+## 5.5 验收标准
+
+- [x] SDK 初始化后能自动采集 `$page_view`。
+- [x] 点击页面元素能产生 `$element_click`。
+- [x] 页面离开时能产生 `$page_leave`。
+- [x] 曝光元素进入视口后能自动上报 `data-track-event` 指定事件。
+- [x] `Monitor.track` 能写入 `track_events`。
+- [x] `Monitor.identify` 能写入 `track_id_mapping`。
+- [x] `Monitor.setUserProperties` 能更新 `track_user_profiles.properties`。
+- [x] 管理端能筛选用户画像并查看事件时间线。

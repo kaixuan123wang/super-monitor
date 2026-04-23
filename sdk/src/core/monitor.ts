@@ -27,6 +27,7 @@ import { installPerformancePlugin } from '../plugins/performance';
 import { installBreadcrumbPlugin } from '../plugins/breadcrumb';
 import { installConsolePlugin } from '../plugins/console';
 import { installAutoTrackPlugin } from '../plugins/auto-track';
+import { installExposurePlugin } from '../plugins/exposure';
 
 export const SDK_VERSION = '1.0.0';
 
@@ -129,11 +130,16 @@ class MonitorSDK {
   /** ========== 埋点 API ========== */
 
   track(eventName: string, properties?: Properties): void {
+    this.trackWithPriority(eventName, properties);
+  }
+
+  private trackWithPriority(
+    eventName: string,
+    properties?: Properties,
+    priority?: CollectPayload['priority']
+  ): void {
     if (!this.ensureReady()) return;
-    const mergedProps: Properties = {
-      ...this.superProps!.getAll(),
-      ...(properties || {}),
-    };
+    const superProperties = this.superProps!.getAll();
     this.report({
       type: 'track',
       data: {
@@ -141,9 +147,11 @@ class MonitorSDK {
         anonymous_id: this.identity!.getAnonymousId(),
         is_login_id: this.identity!.isLoginId(),
         event: eventName,
-        properties: mergedProps,
+        properties: { ...(properties || {}) },
+        super_properties: superProperties,
         client_time: now(),
       },
+      priority,
     });
   }
 
@@ -304,8 +312,17 @@ class MonitorSDK {
       if (hasAnyAutoTrack) {
         this.cleanups.push(
           installAutoTrackPlugin({
-            track: (event, properties) => this.track(event, properties as import('../types').Properties),
+            track: (event, properties, priority) =>
+              this.trackWithPriority(event, properties as import('../types').Properties, priority),
             config: cfg.tracking,
+          })
+        );
+      }
+
+      if (autoTrackCfg.exposure === true) {
+        this.cleanups.push(
+          installExposurePlugin({
+            track: (event, properties) => this.track(event, properties as import('../types').Properties),
           })
         );
       }
@@ -323,6 +340,7 @@ class MonitorSDK {
     if (typeof window !== 'undefined') {
       try {
         ctx.url = window.location?.href;
+        ctx.title = document.title;
         ctx.referrer = document.referrer;
         ctx.user_agent = navigator.userAgent;
         ctx.language = navigator.language;
@@ -332,11 +350,11 @@ class MonitorSDK {
         ctx.viewport = `${window.innerWidth}x${window.innerHeight}`;
         ctx.screen_resolution = `${screen.width}x${screen.height}`;
         const parsed = parseUA(navigator.userAgent);
-        (ctx as Record<string, unknown>).browser = parsed.browser;
-        (ctx as Record<string, unknown>).browser_version = parsed.browser_version;
-        (ctx as Record<string, unknown>).os = parsed.os;
-        (ctx as Record<string, unknown>).os_version = parsed.os_version;
-        (ctx as Record<string, unknown>).device_type = parsed.device_type;
+        ctx.browser = parsed.browser;
+        ctx.browser_version = parsed.browser_version;
+        ctx.os = parsed.os;
+        ctx.os_version = parsed.os_version;
+        ctx.device_type = parsed.device_type;
       } catch {
         /* ignore */
       }
@@ -344,6 +362,7 @@ class MonitorSDK {
     if (this.identity) {
       ctx.distinct_id = this.identity.getDistinctId();
       ctx.anonymous_id = this.identity.getAnonymousId();
+      ctx.is_login_id = this.identity.isLoginId();
     }
     if (this.breadcrumb) {
       ctx.breadcrumb = this.breadcrumb.getAll();

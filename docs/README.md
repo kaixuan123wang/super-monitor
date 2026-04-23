@@ -1,6 +1,6 @@
 # JS 监控平台 — 技术设计方案
 
-构建一个完整的 JS 监控平台，包含 **脚本端 SDK**（可注入任意网站/Chrome 插件）和 **监控端管理系统**（Vue3 + Vite + Rust），实现前端错误监控、接口监控、AI 智能分析、实时告警等功能。
+构建一个完整的 JS 监控平台，包含 **脚本端 SDK**（可注入任意网站）和 **监控端管理系统**（Vue3 + Vite + Rust），实现前端错误监控、接口监控、AI 智能分析、实时告警和前端埋点信息采集等功能。
 
 ---
 
@@ -106,12 +106,6 @@ js-monitor-platform/
 │   ├── Cargo.toml
 │   └── Dockerfile
 │
-├── chrome-extension/             # Chrome 插件端
-│   ├── manifest.json
-│   ├── popup/                    # 插件弹窗（复用 Vue3 组件）
-│   ├── content-script.ts         # 注入 SDK 到页面
-│   └── background.ts             # 后台服务
-│
 ├── docker-compose.yml            # 一键部署（Rust + PostgreSQL + Redis）
 └── README.md
 ```
@@ -166,7 +160,7 @@ js-monitor-platform/
 8. **SSE 推送范围**：用户登录后推送其所有有权限项目的告警
 9. **埋点 API 风格**：参考 Mixpanel/Amplitude 现代设计（track / identify / setUserProperties），兼容 Sensors Data 用户关联体系
 10. **全埋点策略**：自动采集 $page_view / $element_click / $page_leave，可通过初始化配置单独开关
-11. **埋点与监控共用 SDK**：埋点功能作为插件集成到现有 JS 监控 SDK 中，共用上报通道和队列
+11. **埋点与监控共用 SDK**：埋点功能作为 SDK 内置模块集成到现有 JS 监控 SDK 中，共用上报通道和队列
 12. **用户身份**：采用简易 IDM（匿名 ID → 登录 ID 关联），不实现复杂的全域 ID 合并
 
 ---
@@ -179,7 +173,7 @@ js-monitor-platform/
 | Phase 2 | 核心监控：SDK 采集上报 + 后端存储 + 前端项目/错误列表 + **埋点核心 API + track_events 表** | ~60 |
 | Phase 3 | 数据可视化：ECharts 仪表盘 + SSE 实时推送 + **全埋点采集 + 埋点管理平台 + 事件分析页** | ~45 |
 | Phase 4 | AI 与告警：Source Map 上传/解析 + AI 分析 + 告警规则 + **漏斗分析 + 留存分析 + 实时事件流** | ~50 |
-| Phase 5 | 管理功能：用户/分组/权限 + Chrome 插件 + 部署配置 + **用户画像 + 曝光追踪** | ~40 |
+| Phase 5 | 前端埋点信息采集：**用户画像 + 曝光追踪 + 采集闭环** | ~25 |
 
 ---
 
@@ -189,7 +183,7 @@ js-monitor-platform/
 - [Phase 2：核心监控功能](phase2.md)
 - [Phase 3：数据可视化](phase3.md)
 - [Phase 4：AI 与告警](phase4.md)
-- [Phase 5：管理功能](phase5.md)
+- [Phase 5：前端埋点信息采集](phase5.md)
 - [附录：数据库设计](database.md)
 - [附录：API 设计](api.md)
 - [附录：SDK 设计](sdk.md)

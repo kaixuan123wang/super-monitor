@@ -10,7 +10,7 @@ import type { TrackingConfig } from '../types';
 
 export interface AutoTrackOptions {
   /** 触发埋点事件的回调（由 Monitor 注入） */
-  track: (event: string, properties: Record<string, unknown>) => void;
+  track: (event: string, properties: Record<string, unknown>, priority?: 'P0' | 'P1') => void;
   config?: TrackingConfig;
 }
 
@@ -153,15 +153,18 @@ function getElementPath(el: Element): string {
 
 function installPageLeave(track: AutoTrackOptions['track']): () => void {
   const enterTime = Date.now();
+  let fired = false;
 
   const fire = (reason: string) => {
+    if (fired) return;
+    fired = true;
     const duration = (Date.now() - enterTime) / 1000;
     track('$page_leave', {
       $page_url: location.href,
       $page_title: document.title,
       $stay_duration: Math.round(duration * 10) / 10,
       $leave_reason: reason,
-    });
+    }, 'P0');
   };
 
   const handleBeforeUnload = () => fire('unload');

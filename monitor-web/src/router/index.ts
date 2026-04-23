@@ -1,6 +1,19 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router';
+import { useUserStore } from '@/stores/user';
 
 const routes: RouteRecordRaw[] = [
+  {
+    path: '/login',
+    name: 'Login',
+    component: () => import('@/views/login/index.vue'),
+    meta: { public: true },
+  },
+  {
+    path: '/register',
+    name: 'Register',
+    component: () => import('@/views/register/index.vue'),
+    meta: { public: true },
+  },
   {
     path: '/',
     component: () => import('@/components/layout/BasicLayout.vue'),
@@ -67,6 +80,30 @@ const routes: RouteRecordRaw[] = [
             component: () => import('@/views/tracking/analysis/index.vue'),
             meta: { title: '事件分析' },
           },
+          {
+            path: 'funnel',
+            name: 'TrackFunnel',
+            component: () => import('@/views/tracking/funnel/index.vue'),
+            meta: { title: '漏斗分析' },
+          },
+          {
+            path: 'retention',
+            name: 'TrackRetention',
+            component: () => import('@/views/tracking/retention/index.vue'),
+            meta: { title: '留存分析' },
+          },
+          {
+            path: 'users',
+            name: 'TrackUsers',
+            component: () => import('@/views/tracking/users/index.vue'),
+            meta: { title: '用户画像' },
+          },
+          {
+            path: 'debug',
+            name: 'TrackDebug',
+            component: () => import('@/views/tracking/debug/index.vue'),
+            meta: { title: '实时事件流' },
+          },
         ],
       },
       {
@@ -94,6 +131,20 @@ const routes: RouteRecordRaw[] = [
 const router = createRouter({
   history: createWebHistory(),
   routes,
+});
+
+router.beforeEach((to, _from, next) => {
+  const userStore = useUserStore();
+  const isPublic = to.meta?.public === true;
+  const isLoggedIn = userStore.isLoggedIn;
+
+  if (!isPublic && !isLoggedIn) {
+    next('/login');
+  } else if ((to.path === '/login' || to.path === '/register') && isLoggedIn) {
+    next('/');
+  } else {
+    next();
+  }
 });
 
 export default router;

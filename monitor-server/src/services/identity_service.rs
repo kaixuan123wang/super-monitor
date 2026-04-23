@@ -1,11 +1,14 @@
 //! 用户 ID 关联合并服务（匿名 ID ↔ 登录 ID）。
 //!
-//! 当前实现：写入 track_id_mapping，重复 (project_id, anonymous_id) 忽略。
-//! 复杂的跨设备合并留到后续阶段。
+//! 写入 `track_id_mapping`，并把匿名阶段事件 / Profile 合并到登录 ID。
+//! 复杂的跨设备多 ID 图谱仍留到后续阶段。
 
 use chrono::{DateTime, FixedOffset, Utc};
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
-use serde_json::Value;
+use sea_orm::{
+    sea_query::Expr, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
+    Set,
+};
+use serde_json::{json, Value};
 
 use crate::error::{AppError, AppResult};
 use crate::models;
@@ -39,17 +42,149 @@ pub async fn save_id_mapping(
         .filter(models::track_id_mapping::Column::AnonymousId.eq(anonymous_id.clone()))
         .one(db)
         .await?;
-    if existing.is_some() {
-        return Ok(());
+    if existing.is_none() {
+        let active = models::track_id_mapping::ActiveModel {
+            id: sea_orm::NotSet,
+            project_id: Set(project_id),
+            anonymous_id: Set(anonymous_id.clone()),
+            login_id: Set(login_id.clone()),
+            merged_at: Set(now_fixed()),
+        };
+        active.insert(db).await?;
     }
 
-    let active = models::track_id_mapping::ActiveModel {
-        id: sea_orm::NotSet,
-        project_id: Set(project_id),
-        anonymous_id: Set(anonymous_id),
-        login_id: Set(login_id),
-        merged_at: Set(now_fixed()),
-    };
-    active.insert(db).await?;
+    merge_profile(db, project_id, &anonymous_id, &login_id).await?;
+    merge_events(db, project_id, &anonymous_id, &login_id).await?;
     Ok(())
+}
+
+async fn merge_events(
+    db: &DatabaseConnection,
+    project_id: i32,
+    anonymous_id: &str,
+    login_id: &str,
+) -> AppResult<()> {
+    models::TrackEvent::update_many()
+        .col_expr(
+            models::track_event::Column::DistinctId,
+            Expr::value(login_id.to_string()),
+        )
+        .col_expr(
+            models::track_event::Column::UserId,
+            Expr::value(login_id.to_string()),
+        )
+        .col_expr(models::track_event::Column::IsLoginId, Expr::value(true))
+        .filter(models::track_event::Column::ProjectId.eq(project_id))
+        .filter(models::track_event::Column::DistinctId.eq(anonymous_id))
+        .exec(db)
+        .await?;
+    Ok(())
+}
+
+async fn merge_profile(
+    db: &DatabaseConnection,
+    project_id: i32,
+    anonymous_id: &str,
+    login_id: &str,
+) -> AppResult<()> {
+    let anon = models::TrackUserProfile::find()
+        .filter(models::track_user_profile::Column::ProjectId.eq(project_id))
+        .filter(models::track_user_profile::Column::DistinctId.eq(anonymous_id))
+        .one(db)
+        .await?;
+    let login = models::TrackUserProfile::find()
+        .filter(models::track_user_profile::Column::ProjectId.eq(project_id))
+        .filter(models::track_user_profile::Column::DistinctId.eq(login_id))
+        .one(db)
+        .await?;
+
+    match (anon, login) {
+        (Some(anon), Some(login)) => {
+            let mut am: models::track_user_profile::ActiveModel = login.clone().into();
+            am.anonymous_id = Set(login.anonymous_id.or(Some(anonymous_id.to_string())));
+            am.user_id = Set(Some(login_id.to_string()));
+            am.properties = Set(merge_properties(&anon.properties, &login.properties));
+            am.first_visit_at = Set(min_time(anon.first_visit_at, login.first_visit_at));
+            am.last_visit_at = Set(max_time(anon.last_visit_at, login.last_visit_at));
+            am.total_events = Set(anon.total_events + login.total_events);
+            am.total_sessions = Set(anon.total_sessions + login.total_sessions);
+            am.updated_at = Set(now_fixed());
+            am.update(db).await?;
+            models::TrackUserProfile::delete_by_id(anon.id).exec(db).await?;
+        }
+        (Some(anon), None) => {
+            let mut am: models::track_user_profile::ActiveModel = anon.into();
+            am.distinct_id = Set(login_id.to_string());
+            am.anonymous_id = Set(Some(anonymous_id.to_string()));
+            am.user_id = Set(Some(login_id.to_string()));
+            am.updated_at = Set(now_fixed());
+            am.update(db).await?;
+        }
+        (None, Some(login)) => {
+            let mut am: models::track_user_profile::ActiveModel = login.into();
+            am.anonymous_id = Set(Some(anonymous_id.to_string()));
+            am.user_id = Set(Some(login_id.to_string()));
+            am.updated_at = Set(now_fixed());
+            am.update(db).await?;
+        }
+        (None, None) => {
+            let active = models::track_user_profile::ActiveModel {
+                id: sea_orm::NotSet,
+                project_id: Set(project_id),
+                distinct_id: Set(login_id.to_string()),
+                anonymous_id: Set(Some(anonymous_id.to_string())),
+                user_id: Set(Some(login_id.to_string())),
+                name: Set(None),
+                email: Set(None),
+                phone: Set(None),
+                properties: Set(json!({})),
+                first_visit_at: Set(Some(now_fixed())),
+                last_visit_at: Set(Some(now_fixed())),
+                total_events: Set(0),
+                total_sessions: Set(0),
+                created_at: Set(now_fixed()),
+                updated_at: Set(now_fixed()),
+            };
+            active.insert(db).await?;
+        }
+    }
+
+    Ok(())
+}
+
+fn merge_properties(anonymous: &Value, login: &Value) -> Value {
+    let mut merged = match anonymous {
+        Value::Object(_) => anonymous.clone(),
+        _ => json!({}),
+    };
+    if let (Some(base), Some(login_obj)) = (merged.as_object_mut(), login.as_object()) {
+        for (key, value) in login_obj {
+            base.insert(key.clone(), value.clone());
+        }
+    }
+    merged
+}
+
+fn min_time(
+    a: Option<DateTime<FixedOffset>>,
+    b: Option<DateTime<FixedOffset>>,
+) -> Option<DateTime<FixedOffset>> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    }
+}
+
+fn max_time(
+    a: Option<DateTime<FixedOffset>>,
+    b: Option<DateTime<FixedOffset>>,
+) -> Option<DateTime<FixedOffset>> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    }
 }

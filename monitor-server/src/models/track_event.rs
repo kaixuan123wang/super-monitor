@@ -25,6 +25,8 @@ pub struct Model {
     pub page_url: Option<String>,
     pub page_title: Option<String>,
     pub referrer: Option<String>,
+    pub viewport: Option<String>,
+    pub screen_resolution: Option<String>,
     pub user_agent: Option<String>,
     pub browser: Option<String>,
     pub browser_version: Option<String>,

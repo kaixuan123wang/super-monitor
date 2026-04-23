@@ -13,15 +13,19 @@
 //! 鉴权：通过 `X-App-Id` 头部查询 `projects` 表，若项目不存在或 app_key 不匹配，拒绝。
 
 use axum::{extract::State, http::HeaderMap, Json};
-use chrono::{DateTime, FixedOffset, Utc};
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use chrono::{DateTime, Duration, FixedOffset, Utc};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
+    Set,
+};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::config::Config;
 use crate::error::{AppError, AppResult};
 use crate::models;
 use crate::router::AppState;
-use crate::services::{identity_service, track_service};
+use crate::services::{ai_service, alert_service, identity_service, track_service};
 
 #[derive(Debug, Deserialize)]
 pub struct CollectPayload {
@@ -55,7 +59,7 @@ pub async fn collect(
         return Err(AppError::Unauthorized);
     }
 
-    dispatch(db, &project, payload).await?;
+    dispatch(db, &project, payload, None, &state.alert_tx, &state.config).await?;
 
     Ok(Json(json!({ "code": 0, "message": "ok", "data": null })))
 }
@@ -73,6 +77,9 @@ fn dispatch<'a>(
     db: &'a DatabaseConnection,
     project: &'a models::project::Model,
     payload: Value,
+    inherited_context: Option<Value>,
+    alert_tx: &'a tokio::sync::broadcast::Sender<alert_service::AlertEvent>,
+    cfg: &'a Config,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = AppResult<()>> + Send + 'a>> {
     Box::pin(async move {
         let type_ = payload
@@ -81,10 +88,10 @@ fn dispatch<'a>(
             .unwrap_or("")
             .to_string();
         let data = payload.get("data").cloned().unwrap_or(Value::Null);
-        let context = extract_context(&data, &payload);
+        let context = extract_context(&data, &payload, inherited_context.as_ref());
 
         match type_.as_str() {
-            "error" => save_error(db, project, &data, &context).await?,
+            "error" => save_error(db, project, &data, &context, alert_tx, cfg).await?,
             "network" => save_network(db, project, &data, &context).await?,
             "performance" => save_performance(db, project, &data, &context).await?,
             "track" => {
@@ -111,7 +118,15 @@ fn dispatch<'a>(
             "batch" => {
                 if let Some(arr) = data.as_array() {
                     for item in arr {
-                        dispatch(db, project, item.clone()).await?;
+                        dispatch(
+                            db,
+                            project,
+                            item.clone(),
+                            Some(context.clone()),
+                            alert_tx,
+                            cfg,
+                        )
+                        .await?;
                     }
                 }
             }
@@ -124,12 +139,15 @@ fn dispatch<'a>(
     })
 }
 
-/// 从 data 中抽出 `__context` 字段（SDK 注入），合并外层 context。
-fn extract_context(data: &Value, payload: &Value) -> Value {
+/// 从 data 中抽出 `__context` 字段（SDK 注入），否则继承外层 batch context。
+fn extract_context(data: &Value, payload: &Value, inherited_context: Option<&Value>) -> Value {
     if let Some(ctx) = data.get("__context") {
         return ctx.clone();
     }
     if let Some(ctx) = payload.get("context") {
+        return ctx.clone();
+    }
+    if let Some(ctx) = inherited_context {
         return ctx.clone();
     }
     Value::Null
@@ -140,7 +158,9 @@ fn ctx_str(ctx: &Value, key: &str) -> Option<String> {
 }
 
 fn data_str(data: &Value, key: &str) -> Option<String> {
-    data.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
+    data.get(key)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 fn data_i32(data: &Value, key: &str) -> Option<i32> {
@@ -160,6 +180,8 @@ async fn save_error(
     project: &models::project::Model,
     data: &Value,
     ctx: &Value,
+    alert_tx: &tokio::sync::broadcast::Sender<alert_service::AlertEvent>,
+    cfg: &Config,
 ) -> AppResult<()> {
     let active = models::js_error::ActiveModel {
         id: sea_orm::NotSet,
@@ -194,8 +216,52 @@ async fn save_error(
         distinct_id: Set(ctx_str(ctx, "distinct_id")),
         created_at: Set(now_fixed()),
     };
-    active.insert(db).await?;
+    let saved = active.insert(db).await?;
+    alert_service::check_on_new_error(db, alert_tx, project.id, &saved).await;
+    maybe_auto_analyze(db, cfg, &saved).await;
     Ok(())
+}
+
+async fn maybe_auto_analyze(
+    db: &DatabaseConnection,
+    cfg: &Config,
+    error: &models::js_error::Model,
+) {
+    if !cfg.ai_enabled || cfg.ai_api_key.is_empty() {
+        return;
+    }
+    let Some(fp) = error.fingerprint.as_deref() else {
+        return;
+    };
+
+    let total_same_fp = models::JsError::find()
+        .filter(models::js_error::Column::ProjectId.eq(error.project_id))
+        .filter(models::js_error::Column::Fingerprint.eq(fp))
+        .count(db)
+        .await
+        .unwrap_or(0);
+
+    let since = (Utc::now() - Duration::hours(1)).with_timezone(&FixedOffset::east_opt(0).unwrap());
+    let recent_same_fp = models::JsError::find()
+        .filter(models::js_error::Column::ProjectId.eq(error.project_id))
+        .filter(models::js_error::Column::Fingerprint.eq(fp))
+        .filter(models::js_error::Column::CreatedAt.gte(since))
+        .count(db)
+        .await
+        .unwrap_or(0);
+
+    if total_same_fp > 1 && recent_same_fp <= 50 {
+        return;
+    }
+
+    let db_clone = db.clone();
+    let cfg_clone = cfg.clone();
+    let error_clone = error.clone();
+    tokio::spawn(async move {
+        if let Err(e) = ai_service::analyze_error(&db_clone, &cfg_clone, &error_clone).await {
+            tracing::warn!(error_id = error_clone.id, error = %e, "automatic AI analysis failed");
+        }
+    });
 }
 
 async fn save_network(
@@ -275,5 +341,3 @@ async fn save_performance(
     active.insert(db).await?;
     Ok(())
 }
-
-

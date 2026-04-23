@@ -9,6 +9,10 @@ mod m20240201_000005_create_performance_data_table;
 mod m20240201_000006_create_track_tables;
 mod m20240301_000001_create_event_stats_table;
 mod m20240301_000002_create_event_definitions_table;
+mod m20240401_000001_create_ai_analyses_table;
+mod m20240401_000002_create_alert_tables;
+mod m20240401_000003_create_funnel_retention_sourcemap_tables;
+mod m20240401_000004_add_track_event_context_columns;
 
 pub struct Migrator;
 
@@ -25,6 +29,10 @@ impl MigratorTrait for Migrator {
             Box::new(m20240201_000006_create_track_tables::Migration),
             Box::new(m20240301_000001_create_event_stats_table::Migration),
             Box::new(m20240301_000002_create_event_definitions_table::Migration),
+            Box::new(m20240401_000001_create_ai_analyses_table::Migration),
+            Box::new(m20240401_000002_create_alert_tables::Migration),
+            Box::new(m20240401_000003_create_funnel_retention_sourcemap_tables::Migration),
+            Box::new(m20240401_000004_add_track_event_context_columns::Migration),
         ]
     }
 }

@@ -32,26 +32,23 @@ version: '3.8'
 
 services:
   nginx:
-    image: nginx:alpine
+    image: nginx:1.25-alpine
     ports:
       - "80:80"
-      - "443:443"
     volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf
-      - ./ssl:/etc/nginx/ssl
-      - ./monitor-web/dist:/usr/share/nginx/html
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
+      - monitor-web
       - monitor-server
 
   postgres:
     image: postgres:15-alpine
     environment:
       POSTGRES_USER: monitor
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-      POSTGRES_DB: js_monitor
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-monitor123}
+      POSTGRES_DB: js_monitor_dev
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
       - "5432:5432"
 
@@ -64,23 +61,28 @@ services:
   monitor-server:
     build: ./monitor-server
     environment:
-      DATABASE_URL: postgres://monitor:${DB_PASSWORD}@postgres/js_monitor
+      DATABASE_URL: postgres://monitor:${DB_PASSWORD:-monitor123}@postgres/js_monitor_dev
       REDIS_URL: redis://redis:6379
-      AI_API_KEY: ${AI_API_KEY}
-      JWT_SECRET: ${JWT_SECRET}
+      AI_API_KEY: ${AI_API_KEY:-}
+      JWT_SECRET: ${JWT_SECRET:-please-change-me}
       RUST_LOG: info
     ports:
       - "8080:8080"
-      - "8081:8081"  # SSE 端口
     depends_on:
       - postgres
       - redis
     volumes:
-      - ./uploads:/app/uploads
+      - sourcemaps:/app/data/sourcemaps
+
+  monitor-web:
+    build: ./monitor-web
+    depends_on:
+      - monitor-server
 
 volumes:
   pgdata:
   redisdata:
+  sourcemaps:
 ```
 
 ---

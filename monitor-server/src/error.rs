@@ -14,6 +14,9 @@ pub enum AppError {
     #[error("forbidden")]
     Forbidden,
 
+    #[error("too many requests: {0}")]
+    TooManyRequests(String),
+
     #[error("not found")]
     NotFound,
 
@@ -30,6 +33,7 @@ impl IntoResponse for AppError {
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, 400),
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, 401),
             AppError::Forbidden => (StatusCode::FORBIDDEN, 403),
+            AppError::TooManyRequests(_) => (StatusCode::TOO_MANY_REQUESTS, 429),
             AppError::NotFound => (StatusCode::NOT_FOUND, 404),
             AppError::Internal(_) | AppError::Database(_) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, 500)

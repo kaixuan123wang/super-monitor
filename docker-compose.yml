@@ -1,8 +1,5 @@
 version: '3.8'
 
-# Phase 1 开发环境：仅启动 PostgreSQL + Redis。
-# Phase 5 部署阶段会在此基础上加入 nginx / monitor-server / monitor-web。
-
 services:
   postgres:
     image: postgres:15-alpine
@@ -10,7 +7,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: monitor
-      POSTGRES_PASSWORD: monitor123
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-monitor123}
       POSTGRES_DB: js_monitor_dev
     ports:
       - "5432:5432"
@@ -37,6 +34,53 @@ services:
       timeout: 3s
       retries: 5
 
+  monitor-server:
+    build:
+      context: ./monitor-server
+    container_name: js_monitor_server
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://monitor:${DB_PASSWORD:-monitor123}@postgres/js_monitor_dev
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-please-change-me}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_API_BASE: ${AI_API_BASE:-https://api.deepseek.com/v1}
+      AI_MODEL: ${AI_MODEL:-deepseek-chat}
+      AI_ENABLED: ${AI_ENABLED:-true}
+      SERVER_PORT: 8080
+      SSE_PORT: 8081
+      RUST_LOG: ${RUST_LOG:-info}
+    ports:
+      - "8080:8080"
+    volumes:
+      - sourcemaps:/app/data/sourcemaps
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  monitor-web:
+    build:
+      context: ./monitor-web
+    container_name: js_monitor_web
+    restart: unless-stopped
+    depends_on:
+      - monitor-server
+
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: js_monitor_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - monitor-web
+      - monitor-server
+
 volumes:
   pgdata:
   redisdata:
+  sourcemaps:

@@ -3,14 +3,14 @@
 //! GET /api/dashboard/overview   概览统计（错误数/趋势/分布/性能均值/Top 错误）
 //! GET /api/dashboard/realtime   SSE 长连接，推送 error / heartbeat 事件
 
+use axum::response::sse::{Event, KeepAlive};
 use axum::{
     extract::{Query, State},
     response::Sse,
     Json,
 };
-use axum::response::sse::{Event, KeepAlive};
 use chrono::{Duration, Utc};
-use futures_util::stream::{self, StreamExt};
+use futures_util::stream;
 use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
     QuerySelect,
@@ -241,7 +241,9 @@ async fn build_top_errors(
     result.truncate(10);
     Ok(result
         .into_iter()
-        .map(|(fp, message, count)| json!({ "fingerprint": fp, "message": message, "count": count }))
+        .map(
+            |(fp, message, count)| json!({ "fingerprint": fp, "message": message, "count": count }),
+        )
         .collect())
 }
 
@@ -280,35 +282,31 @@ async fn build_avg_performance(
 }
 
 // ── SSE 实时推送 ───────────────────────────────────────────────────────────────
-//
-// 策略：
-//   tick=0  → 推送 init 事件（含当前最大 error id 作为 cursor）
-//   tick 奇 → 每 5s 轮询一次 DB，若有新错误则逐条推送 error 事件
-//   tick 偶 → 每 30s 推送一次 heartbeat
 
-#[derive(Clone)]
 struct SseState {
     db: Option<sea_orm::DatabaseConnection>,
     project_id: i32,
     last_error_id: i64,
     tick: u64,
+    alert_rx: tokio::sync::broadcast::Receiver<crate::services::alert_service::AlertEvent>,
 }
 
 pub async fn realtime(
     State(state): State<AppState>,
     Query(q): Query<OverviewQuery>,
 ) -> Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>> {
+    let alert_rx = state.alert_tx.subscribe();
     let init_state = SseState {
         db: state.db.clone(),
         project_id: q.project_id,
         last_error_id: 0,
         tick: 0,
+        alert_rx,
     };
 
     let stream = stream::unfold(init_state, move |mut s| async move {
         match s.tick {
             0 => {
-                // 首次连接：获取当前最大 error id 作为 cursor，避免重推历史错误
                 let cursor = if let Some(db) = &s.db {
                     fetch_latest_error_id(db, s.project_id).await.unwrap_or(0)
                 } else {
@@ -317,19 +315,16 @@ pub async fn realtime(
                 s.last_error_id = cursor;
                 s.tick = 1;
 
-                let event = Event::default()
-                    .event("init")
-                    .data(
-                        json!({
-                            "project_id": s.project_id,
-                            "connection_id": uuid::Uuid::new_v4(),
-                        })
-                        .to_string(),
-                    );
+                let event = Event::default().event("init").data(
+                    json!({
+                        "project_id": s.project_id,
+                        "connection_id": uuid::Uuid::new_v4(),
+                    })
+                    .to_string(),
+                );
                 Some((Ok(event), s))
             }
             tick if tick % 6 == 0 => {
-                // 每 6 tick（约 30s）推送心跳
                 tokio::time::sleep(StdDuration::from_secs(5)).await;
                 s.tick += 1;
                 let event = Event::default()
@@ -338,34 +333,39 @@ pub async fn realtime(
                 Some((Ok(event), s))
             }
             _ => {
-                // 每 5s 轮询新错误
+                // 先检查 alert 广播（非阻塞）
+                while let Ok(alert) = s.alert_rx.try_recv() {
+                    if alert.project_id == s.project_id {
+                        s.tick += 1;
+                        let event = Event::default()
+                            .event("alert")
+                            .data(serde_json::to_string(&alert).unwrap_or_default());
+                        return Some((Ok(event), s));
+                    }
+                }
+
                 tokio::time::sleep(StdDuration::from_secs(5)).await;
                 s.tick += 1;
 
                 if let Some(db) = &s.db {
                     match fetch_new_errors(db, s.project_id, s.last_error_id).await {
                         Ok(errors) if !errors.is_empty() => {
-                            // 更新 cursor 为本批最大 id
                             if let Some(max_id) = errors.iter().map(|e| e.id).max() {
                                 s.last_error_id = max_id;
                             }
-                            // 只推第一条（避免一次发太多），后续轮询会继续推
                             let e = &errors[0];
-                            let event = Event::default()
-                                .event("error")
-                                .data(
-                                    json!({
-                                        "id": e.id,
-                                        "message": e.message,
-                                        "error_type": e.error_type,
-                                        "created_at": e.created_at,
-                                        "project_id": e.project_id,
-                                    })
-                                    .to_string(),
-                                );
-                            // 若还有更多，下次轮询会继续
+                            let event = Event::default().event("error").data(
+                                json!({
+                                    "id": e.id,
+                                    "message": e.message,
+                                    "error_type": e.error_type,
+                                    "created_at": e.created_at,
+                                    "project_id": e.project_id,
+                                })
+                                .to_string(),
+                            );
                             if errors.len() > 1 {
-                                s.last_error_id = errors[0].id; // 只步进 1 条
+                                s.last_error_id = errors[0].id;
                             }
                             return Some((Ok(event), s));
                         }
@@ -373,7 +373,6 @@ pub async fn realtime(
                     }
                 }
 
-                // 无新错误：推一个空 comment 保持连接（不触发前端 onmessage）
                 let event = Event::default().comment("poll");
                 Some((Ok(event), s))
             }
@@ -383,7 +382,10 @@ pub async fn realtime(
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
-async fn fetch_latest_error_id(db: &sea_orm::DatabaseConnection, project_id: i32) -> AppResult<i64> {
+async fn fetch_latest_error_id(
+    db: &sea_orm::DatabaseConnection,
+    project_id: i32,
+) -> AppResult<i64> {
     let row = models::JsError::find()
         .filter(models::js_error::Column::ProjectId.eq(project_id))
         .order_by_desc(models::js_error::Column::Id)

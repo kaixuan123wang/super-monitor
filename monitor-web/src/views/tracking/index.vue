@@ -8,6 +8,10 @@ const router = useRouter();
 const tabs = [
   { name: 'TrackEvents', path: '/tracking/events', label: '事件管理' },
   { name: 'TrackAnalysis', path: '/tracking/analysis', label: '事件分析' },
+  { name: 'TrackFunnel', path: '/tracking/funnel', label: '漏斗分析' },
+  { name: 'TrackRetention', path: '/tracking/retention', label: '留存分析' },
+  { name: 'TrackUsers', path: '/tracking/users', label: '用户画像' },
+  { name: 'TrackDebug', path: '/tracking/debug', label: '实时事件流' },
 ];
 
 const activeTab = computed(() => {

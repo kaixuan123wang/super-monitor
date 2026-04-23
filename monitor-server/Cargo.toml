@@ -13,7 +13,7 @@ name = "monitor_server"
 path = "src/lib.rs"
 
 [dependencies]
-axum = { version = "0.7", features = ["macros"] }
+axum = { version = "0.7", features = ["macros", "multipart"] }
 futures-util = "0.3"
 tokio = { version = "1", features = ["full"] }
 sea-orm = { version = "1.0", features = [
