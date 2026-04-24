@@ -12,6 +12,15 @@
 import type { CollectPayload, MonitorConfig, ReportContext } from '../types';
 import { Store } from './store';
 
+/** 检测当前浏览器是否支持 fetch keepalive（Chrome 64+ / Firefox 131+ / Safari 18.2+） */
+const supportsFetchKeepalive = ((): boolean => {
+  try {
+    return typeof Request !== 'undefined' && 'keepalive' in new Request('about:blank');
+  } catch {
+    return false;
+  }
+})();
+
 export interface ReporterOptions {
   server: string;
   appId: string;
@@ -95,8 +104,9 @@ export class Reporter {
     const items = this.store.drain();
     if (items.length === 0) return;
     const body = JSON.stringify(this.wrapBatch(items));
-    try {
-      if (typeof fetch === 'function') {
+    // 仅当浏览器真正支持 keepalive 时才用 fetch；否则同步 XHR 更可靠
+    if (typeof fetch === 'function' && supportsFetchKeepalive) {
+      try {
         fetch(this.endpoint, {
           method: 'POST',
           headers: this.headers,
@@ -104,11 +114,11 @@ export class Reporter {
           keepalive: true,
         });
         return;
+      } catch {
+        /* ignore */
       }
-    } catch {
-      /* ignore */
     }
-    // 降级：同步 XHR
+    // 降级：同步 XHR（兼容 IE7+ 及所有不支持 fetch keepalive 的浏览器）
     try {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', this.endpoint, false);

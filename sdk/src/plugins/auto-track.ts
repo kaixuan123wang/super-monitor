@@ -73,10 +73,16 @@ function installPageView(track: AutoTrackOptions['track']): () => void {
 }
 
 function firePageView(track: AutoTrackOptions['track']): void {
-  const isFirstVisit = !sessionStorage.getItem('__monitor_visited');
-  const isFirstDay = !localStorage.getItem('__monitor_first_day');
-  if (isFirstVisit) sessionStorage.setItem('__monitor_visited', '1');
-  if (isFirstDay) localStorage.setItem('__monitor_first_day', new Date().toDateString());
+  let isFirstVisit = false;
+  let isFirstDay = false;
+  try {
+    isFirstVisit = !sessionStorage.getItem('__monitor_visited');
+    isFirstDay = !localStorage.getItem('__monitor_first_day');
+    if (isFirstVisit) sessionStorage.setItem('__monitor_visited', '1');
+    if (isFirstDay) localStorage.setItem('__monitor_first_day', new Date().toDateString());
+  } catch {
+    // 隐私模式或禁用 storage 时静默降级
+  }
 
   track('$page_view', {
     $page_url: location.href,

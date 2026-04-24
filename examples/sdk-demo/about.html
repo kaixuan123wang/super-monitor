@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SDK 埋点示例 - 关于</title>
+  <link rel="stylesheet" href="/src/styles.css">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand">🎯 SDK Demo</div>
+    <div class="nav-links">
+      <a href="/index.html">首页</a>
+      <a href="/about.html" class="active">关于</a>
+      <a href="/detail.html">详情</a>
+      <a href="/dashboard.html">上报监控</a>
+    </div>
+  </nav>
+
+  <main class="container">
+    <h1>关于 SDK Demo</h1>
+    <p class="subtitle">本页面用于测试 pageView 自动埋点和页面间跳转的 breadcrumb 记录。</p>
+
+    <section class="card">
+      <h2>📖 项目说明</h2>
+      <p>这是一个用于演示和测试前端监控 SDK 全部功能的示例项目。</p>
+      <ul>
+        <li><strong>错误监控</strong>：自动捕获 JS 错误、Promise 拒绝、资源加载失败</li>
+        <li><strong>性能监控</strong>：采集 FP、FCP、LCP、CLS、TTFB 等 Web Vitals 指标</li>
+        <li><strong>网络监控</strong>：拦截 XMLHttpRequest 和 fetch 请求</li>
+        <li><strong>埋点功能</strong>：手动埋点、自动埋点（点击、浏览、离开、曝光）</li>
+        <li><strong>用户系统</strong>：匿名 ID / 登录 ID 管理、用户属性、超级属性</li>
+        <li><strong>面包屑</strong>：用户行为轨迹记录</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>🧪 在此页面测试</h2>
+      <div class="grid-2">
+        <button id="btnTrackAbout" class="btn-primary">上报 "view_about" 事件</button>
+        <button id="btnTriggerAboutError" class="btn-danger">触发页面错误</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>🔗 导航</h2>
+      <div class="grid-3">
+        <a href="/index.html" class="btn-primary">返回首页</a>
+        <a href="/detail.html" class="btn-primary">去详情页</a>
+        <a href="/dashboard.html" class="btn-primary">上报监控面板</a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>SDK Demo v1.0.0 | 关于页面</p>
+  </footer>
+
+  <script type="module" src="/src/main.js"></script>
+  <script type="module">
+    document.getElementById('btnTrackAbout').addEventListener('click', () => {
+      if (window.Monitor) {
+        window.Monitor.track('view_about', { page_name: 'about', section: 'intro' });
+        showToast('已上报 view_about 事件');
+      }
+    });
+    document.getElementById('btnTriggerAboutError').addEventListener('click', () => {
+      throw new Error('About 页面手动触发的测试错误');
+    });
+  </script>
+</body>
+</html>

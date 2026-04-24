@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SDK 埋点示例 - 上报监控</title>
+  <link rel="stylesheet" href="/src/styles.css">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand">🎯 SDK Demo</div>
+    <div class="nav-links">
+      <a href="/index.html">首页</a>
+      <a href="/about.html">关于</a>
+      <a href="/detail.html">详情</a>
+      <a href="/dashboard.html" class="active">上报监控</a>
+    </div>
+  </nav>
+
+  <main class="container">
+    <h1>📡 上报数据监控面板</h1>
+    <p class="subtitle">实时查看 SDK 上报到模拟服务器的数据。</p>
+
+    <section class="card">
+      <h2>控制面板</h2>
+      <div class="grid-3">
+        <button id="btnRefresh" class="btn-primary">🔄 刷新数据</button>
+        <button id="btnClear" class="btn-secondary">🗑️ 清空记录</button>
+        <button id="btnFlush" class="btn-primary">💾 手动 Flush</button>
+      </div>
+      <div class="stats-bar" style="margin-top: 16px;">
+        <span>总上报数: <strong id="totalCount">0</strong></span>
+        <span>错误: <strong id="errorCount">0</strong></span>
+        <span>埋点: <strong id="trackCount">0</strong></span>
+        <span>性能: <strong id="perfCount">0</strong></span>
+        <span>网络: <strong id="networkCount">0</strong></span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>上报日志</h2>
+      <div id="logContainer" class="log-container">
+        <div class="log-empty">暂无上报数据，请在其他页面操作后返回此处查看。</div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>SDK Demo v1.0.0 | 上报监控面板</p>
+  </footer>
+
+  <script type="module" src="/src/main.js"></script>
+  <script type="module">
+    const API_BASE = 'http://localhost:3456';
+    let autoRefresh = true;
+
+    async function loadData() {
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/records`);
+        const data = await res.json();
+        render(data.data?.records || []);
+      } catch (e) {
+        document.getElementById('logContainer').innerHTML =
+          `<div class="log-error">无法连接到模拟服务器 (${API_BASE})，请确保已运行 npm run mock-server</div>`;
+      }
+    }
+
+    function render(records) {
+      const container = document.getElementById('logContainer');
+      if (records.length === 0) {
+        container.innerHTML = '<div class="log-empty">暂无上报数据</div>';
+        updateStats(records);
+        return;
+      }
+
+      let html = '';
+      records.slice().reverse().forEach((r, i) => {
+        const time = new Date(r.receivedAt).toLocaleTimeString();
+        const type = r.payload?.type || 'unknown';
+        const typeClass = `type-${type}`;
+        html += `
+          <div class="log-item">
+            <div class="log-header">
+              <span class="log-type ${typeClass}">${type}</span>
+              <span class="log-time">${time}</span>
+              <span class="log-id">#${records.length - i}</span>
+            </div>
+            <pre class="log-body">${escapeHtml(JSON.stringify(r.payload, null, 2))}</pre>
+          </div>
+        `;
+      });
+      container.innerHTML = html;
+      updateStats(records);
+    }
+
+    function updateStats(records) {
+      document.getElementById('totalCount').textContent = records.length;
+      document.getElementById('errorCount').textContent = records.filter(r => r.payload?.type === 'error').length;
+      document.getElementById('trackCount').textContent = records.filter(r => r.payload?.type === 'track' || r.payload?.type === 'track_batch').length;
+      document.getElementById('perfCount').textContent = records.filter(r => r.payload?.type === 'performance').length;
+      document.getElementById('networkCount').textContent = records.filter(r => r.payload?.type === 'network').length;
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    document.getElementById('btnRefresh').addEventListener('click', loadData);
+    document.getElementById('btnClear').addEventListener('click', async () => {
+      await fetch(`${API_BASE}/api/v1/records`, { method: 'DELETE' });
+      loadData();
+    });
+    document.getElementById('btnFlush').addEventListener('click', () => {
+      if (window.Monitor) {
+        window.Monitor.flush();
+        showToast('已触发 flush');
+      }
+    });
+
+    loadData();
+    setInterval(() => { if (autoRefresh) loadData(); }, 3000);
+  </script>
+</body>
+</html>

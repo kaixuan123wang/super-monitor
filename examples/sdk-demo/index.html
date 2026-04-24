@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SDK 埋点示例 - 首页</title>
+  <link rel="stylesheet" href="/src/styles.css">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand">🎯 SDK Demo</div>
+    <div class="nav-links">
+      <a href="/index.html" class="active">首页</a>
+      <a href="/about.html">关于</a>
+      <a href="/detail.html">详情</a>
+      <a href="/dashboard.html">上报监控</a>
+    </div>
+  </nav>
+
+  <main class="container">
+    <h1>SDK 埋点功能示例</h1>
+    <p class="subtitle">本项目用于演示和测试 SDK 的全部功能，包括错误监控、性能采集、手动埋点、自动埋点、用户身份、超级属性等。</p>
+
+    <!-- 用户身份模块 -->
+    <section class="card">
+      <h2>👤 用户身份管理</h2>
+      <div class="grid-2">
+        <div>
+          <label>用户 ID:</label>
+          <input type="text" id="userIdInput" placeholder="输入用户 ID 进行登录">
+          <button id="btnLogin" class="btn-primary">登录 (identify)</button>
+          <button id="btnLogout" class="btn-secondary">登出 (logout)</button>
+        </div>
+        <div>
+          <label>匿名 ID:</label>
+          <input type="text" id="anonIdInput" placeholder="输入匿名 ID">
+          <button id="btnSetAnon" class="btn-secondary">设置匿名 ID</button>
+          <div class="info-box">
+            <p>当前 distinct_id: <code id="distinctId">-</code></p>
+            <p>当前 anonymous_id: <code id="anonymousId">-</code></p>
+            <p>是否登录: <code id="isLogin">-</code></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 手动埋点模块 -->
+    <section class="card">
+      <h2>📊 手动埋点</h2>
+      <div class="grid-3">
+        <button id="btnTrackSimple" class="btn-primary">上报简单事件</button>
+        <button id="btnTrackProps" class="btn-primary">上报带属性事件</button>
+        <button id="btnTrackP0" class="btn-primary">实时上报 (P0)</button>
+      </div>
+      <div class="grid-2" style="margin-top: 12px;">
+        <div>
+          <label>事件名称:</label>
+          <input type="text" id="customEventName" value="custom_event" placeholder="输入自定义事件名">
+        </div>
+        <div>
+          <label>事件属性 (JSON):</label>
+          <input type="text" id="customEventProps" value='{"page":"home","source":"demo"}' placeholder='{"key":"value"}'>
+        </div>
+      </div>
+      <button id="btnTrackCustom" class="btn-primary" style="margin-top: 12px;">上报自定义事件</button>
+    </section>
+
+    <!-- 计时器埋点 -->
+    <section class="card">
+      <h2>⏱️ 计时器埋点</h2>
+      <div class="grid-3">
+        <button id="btnTimerStart" class="btn-primary">开始计时 (trackTimerStart)</button>
+        <button id="btnTimerEnd" class="btn-primary">结束计时 (trackTimerEnd)</button>
+        <button id="btnTimerMulti" class="btn-primary">多计时器测试</button>
+      </div>
+      <div id="timerStatus" class="status-box">点击「开始计时」启动一个计时器</div>
+    </section>
+
+    <!-- 用户属性 -->
+    <section class="card">
+      <h2>📝 用户属性设置</h2>
+      <div class="grid-2">
+        <div>
+          <button id="btnSetProps" class="btn-primary">设置用户属性 (setUserProperties)</button>
+          <button id="btnSetOnce" class="btn-primary" style="margin-top:8px">首次设置属性 (setUserPropertiesOnce)</button>
+        </div>
+        <div>
+          <button id="btnAppendProps" class="btn-primary">追加属性 (appendUserProperties)</button>
+          <button id="btnUnsetProp" class="btn-primary" style="margin-top:8px">删除属性 (unsetUserProperty)</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 超级属性 -->
+    <section class="card">
+      <h2>⚡ 超级属性（全局属性）</h2>
+      <div class="grid-2">
+        <div>
+          <label>属性名:</label>
+          <input type="text" id="superPropKey" placeholder="例如: channel">
+          <label>属性值:</label>
+          <input type="text" id="superPropValue" placeholder="例如: wechat">
+          <button id="btnRegisterSuper" class="btn-primary">注册超级属性</button>
+        </div>
+        <div>
+          <button id="btnShowSuper" class="btn-secondary">查看当前超级属性</button>
+          <button id="btnUnregisterSuper" class="btn-secondary">删除超级属性</button>
+          <button id="btnClearSuper" class="btn-secondary">清空超级属性</button>
+          <div id="superPropsDisplay" class="info-box" style="margin-top: 8px;">-</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 面包屑 -->
+    <section class="card">
+      <h2>🍞 面包屑</h2>
+      <div class="grid-3">
+        <button id="btnBreadcrumbInfo" class="btn-primary">添加 Info 面包屑</button>
+        <button id="btnBreadcrumbWarn" class="btn-primary">添加 Warn 面包屑</button>
+        <button id="btnBreadcrumbError" class="btn-primary">添加 Error 面包屑</button>
+      </div>
+    </section>
+
+    <!-- 错误触发 -->
+    <section class="card">
+      <h2>💥 错误触发测试</h2>
+      <div class="grid-3">
+        <button id="btnJsError" class="btn-danger">触发 JS 错误</button>
+        <button id="btnPromiseError" class="btn-danger">触发 Promise 错误</button>
+        <button id="btnResourceError" class="btn-danger">触发资源加载错误</button>
+      </div>
+      <div class="grid-2" style="margin-top: 12px;">
+        <button id="btnConsoleLog" class="btn-secondary">Console 日志测试</button>
+        <button id="btnManualReport" class="btn-secondary">手动 report 上报</button>
+      </div>
+    </section>
+
+    <!-- 网络请求 -->
+    <section class="card">
+      <h2>🌐 网络请求监控</h2>
+      <div class="grid-3">
+        <button id="btnFetchGet" class="btn-primary">发送 GET 请求</button>
+        <button id="btnFetchPost" class="btn-primary">发送 POST 请求</button>
+        <button id="btnFetchError" class="btn-primary">发送失败请求</button>
+      </div>
+    </section>
+
+    <!-- 曝光测试 -->
+    <section class="card">
+      <h2>👁️ 曝光埋点</h2>
+      <p>滚动页面查看下方元素，当元素进入视口时会自动触发曝光事件。</p>
+      <div class="exposure-spacer"></div>
+      <div class="exposure-box" data-track-exposure="banner_promo" data-track-props='{"position":"home_bottom","campaign":"spring"}'>
+        🎁 促销 Banner（滚动到此区域触发曝光事件）
+      </div>
+      <div class="exposure-spacer"></div>
+      <div class="exposure-box" data-track-exposure="product_recommend" data-track-props='{"position":"home_bottom","category":"electronics"}'>
+        📦 商品推荐区（滚动到此区域触发曝光事件）
+      </div>
+    </section>
+
+    <!-- 页面跳转 -->
+    <section class="card">
+      <h2>🔗 页面跳转</h2>
+      <p>跳转到其他页面测试 pageView 和 pageLeave 自动埋点：</p>
+      <div class="grid-3">
+        <a href="/about.html" class="btn-primary">关于页面</a>
+        <a href="/detail.html" class="btn-primary">详情页面</a>
+        <a href="/dashboard.html" class="btn-primary">上报监控面板</a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>SDK Demo v1.0.0 | 用于测试埋点 SDK 全部功能</p>
+  </footer>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SDK 埋点示例 - 详情</title>
+  <link rel="stylesheet" href="/src/styles.css">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand">🎯 SDK Demo</div>
+    <div class="nav-links">
+      <a href="/index.html">首页</a>
+      <a href="/about.html">关于</a>
+      <a href="/detail.html" class="active">详情</a>
+      <a href="/dashboard.html">上报监控</a>
+    </div>
+  </nav>
+
+  <main class="container">
+    <h1>商品详情页</h1>
+    <p class="subtitle">本页面用于测试详情页浏览、曝光埋点和页面离开自动埋点。</p>
+
+    <section class="card">
+      <h2>🛒 商品信息</h2>
+      <div class="product-card">
+        <div class="product-image">📱</div>
+        <div class="product-info">
+          <h3>智能手机 Pro Max</h3>
+          <p class="price">¥ 9,999</p>
+          <p class="desc">旗舰级智能手机，搭载最新处理器，超清摄像头。</p>
+          <div class="product-actions">
+            <button id="btnAddCart" class="btn-primary">加入购物车</button>
+            <button id="btnBuyNow" class="btn-danger">立即购买</button>
+            <button id="btnFav" class="btn-secondary">❤️ 收藏</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>📊 详情页埋点测试</h2>
+      <div class="grid-2">
+        <button id="btnViewDetail" class="btn-primary">上报 "view_product_detail"</button>
+        <button id="btnSimulatePurchase" class="btn-primary">模拟购买流程计时</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>👁️ 推荐商品曝光</h2>
+      <p>向下滚动查看推荐商品，触发曝光埋点。</p>
+      <div class="exposure-spacer"></div>
+      <div class="recommend-list">
+        <div class="recommend-item" data-track-exposure="recommend_item" data-track-props='{"item_id":"101","category":"phone"}'>
+          <div class="item-icon">💻</div>
+          <div class="item-name">笔记本电脑</div>
+        </div>
+        <div class="recommend-item" data-track-exposure="recommend_item" data-track-props='{"item_id":"102","category":"tablet"}'>
+          <div class="item-icon">📟</div>
+          <div class="item-name">平板电脑</div>
+        </div>
+        <div class="recommend-item" data-track-exposure="recommend_item" data-track-props='{"item_id":"103","category":"watch"}'>
+          <div class="item-icon">⌚</div>
+          <div class="item-name">智能手表</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>🔗 导航</h2>
+      <div class="grid-3">
+        <a href="/index.html" class="btn-primary">返回首页</a>
+        <a href="/about.html" class="btn-primary">关于页面</a>
+        <a href="/dashboard.html" class="btn-primary">上报监控面板</a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>SDK Demo v1.0.0 | 详情页面</p>
+  </footer>
+
+  <script type="module" src="/src/main.js"></script>
+  <script type="module">
+    document.getElementById('btnAddCart').addEventListener('click', () => {
+      if (window.Monitor) {
+        window.Monitor.track('add_to_cart', { product_id: 'phone_001', price: 9999, quantity: 1 });
+        showToast('已上报 add_to_cart 事件');
+      }
+    });
+    document.getElementById('btnBuyNow').addEventListener('click', () => {
+      if (window.Monitor) {
+        window.Monitor.track('buy_now_click', { product_id: 'phone_001', price: 9999 });
+        showToast('已上报 buy_now_click 事件');
+      }
+    });
+    document.getElementById('btnFav').addEventListener('click', () => {
+      if (window.Monitor) {
+        window.Monitor.track('add_favorite', { product_id: 'phone_001' });
+        showToast('已上报 add_favorite 事件');
+      }
+    });
+    document.getElementById('btnViewDetail').addEventListener('click', () => {
+      if (window.Monitor) {
+        window.Monitor.track('view_product_detail', { product_id: 'phone_001', category: 'phone' });
+        showToast('已上报 view_product_detail 事件');
+      }
+    });
+
+    // 模拟购买流程计时
+    document.getElementById('btnSimulatePurchase').addEventListener('click', async () => {
+      if (!window.Monitor) return;
+      window.Monitor.trackTimerStart('purchase_flow');
+      showToast('购买流程开始计时...');
+      await new Promise(r => setTimeout(r, 2000));
+      window.Monitor.trackTimerEnd('purchase_flow', { product_id: 'phone_001', success: true });
+      showToast('购买流程计时结束并已上报');
+    });
+  </script>
+</body>
+</html>
