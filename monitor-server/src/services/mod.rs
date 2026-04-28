@@ -2,7 +2,7 @@
 
 pub mod ai_service;
 pub mod alert_service;
+pub mod identity_service;
 pub mod sourcemap_service;
 pub mod stats_service;
 pub mod track_service;
-pub mod identity_service;

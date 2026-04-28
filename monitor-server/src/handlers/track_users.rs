@@ -1,7 +1,7 @@
 //! 埋点用户画像查询。
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Extension, Path, Query, State},
     Json,
 };
 use chrono::{DateTime, FixedOffset};
@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::error::{AppError, AppResult};
+use crate::middleware::auth::{check_project_access, CurrentUser};
 use crate::models;
 use crate::router::AppState;
 
@@ -105,48 +106,56 @@ fn default_operator() -> String {
 
 pub async fn list(
     State(state): State<AppState>,
+    Extension(current_user): Extension<CurrentUser>,
     Query(q): Query<UserListQuery>,
 ) -> AppResult<Json<Value>> {
     let db = state
         .db
         .as_ref()
         .ok_or_else(|| AppError::Internal("database not connected".into()))?;
+    check_project_access(db, &current_user, q.project_id).await?;
 
     let filters = parse_filters(q.filters.as_deref())?;
     let keyword = q.keyword.unwrap_or_default().trim().to_lowercase();
 
-    let rows = models::TrackUserProfile::find()
-        .filter(models::track_user_profile::Column::ProjectId.eq(q.project_id))
-        .order_by_desc(models::track_user_profile::Column::LastVisitAt)
-        .all(db)
-        .await?;
+    // 数据库级关键词过滤（避免全表加载）
+    let mut cursor = models::TrackUserProfile::find()
+        .filter(models::track_user_profile::Column::ProjectId.eq(q.project_id));
 
-    let mut matched: Vec<models::track_user_profile::Model> = rows
+    if !keyword.is_empty() {
+        let like_pattern = format!("%{}%", keyword);
+        cursor = cursor.filter(
+            models::track_user_profile::Column::DistinctId
+                .contains(&like_pattern)
+                .or(models::track_user_profile::Column::UserId.contains(&like_pattern))
+                .or(models::track_user_profile::Column::Name.contains(&like_pattern))
+                .or(models::track_user_profile::Column::Email.contains(&like_pattern)),
+        );
+    }
+
+    // 按 last_visit_at 降序排序，数据库级分页
+    let page_size = q.page_size.clamp(1, 100);
+    let paginator = cursor
+        .order_by_desc(models::track_user_profile::Column::LastVisitAt)
+        .paginate(db, page_size);
+    let total = paginator.num_items().await?;
+    let rows = paginator.fetch_page(q.page.saturating_sub(1)).await?;
+
+    // 仅对当前页数据做应用层属性过滤（避免全表加载）
+    let filtered: Vec<TrackUserDto> = rows
         .into_iter()
-        .filter(|row| keyword_matches(row, &keyword))
         .filter(|row| {
             filters
                 .iter()
                 .all(|filter| property_matches(&row.properties, filter))
         })
-        .collect();
-
-    matched.sort_by(|a, b| b.last_visit_at.cmp(&a.last_visit_at));
-
-    let total = matched.len() as u64;
-    let page_size = q.page_size.max(1);
-    let start = q.page.saturating_sub(1).saturating_mul(page_size) as usize;
-    let list: Vec<TrackUserDto> = matched
-        .into_iter()
-        .skip(start)
-        .take(page_size as usize)
         .map(Into::into)
         .collect();
 
     Ok(Json(json!({
         "code": 0,
         "message": "ok",
-        "data": { "list": list, "total": total },
+        "data": { "list": filtered, "total": total },
         "pagination": {
             "page": q.page,
             "page_size": page_size,
@@ -158,6 +167,7 @@ pub async fn list(
 
 pub async fn detail(
     State(state): State<AppState>,
+    Extension(current_user): Extension<CurrentUser>,
     Path(distinct_id): Path<String>,
     Query(q): Query<UserDetailQuery>,
 ) -> AppResult<Json<Value>> {
@@ -165,6 +175,7 @@ pub async fn detail(
         .db
         .as_ref()
         .ok_or_else(|| AppError::Internal("database not connected".into()))?;
+    check_project_access(db, &current_user, q.project_id).await?;
 
     let user = models::TrackUserProfile::find()
         .filter(models::track_user_profile::Column::ProjectId.eq(q.project_id))
@@ -195,6 +206,7 @@ pub async fn detail(
 
 pub async fn events(
     State(state): State<AppState>,
+    Extension(current_user): Extension<CurrentUser>,
     Path(distinct_id): Path<String>,
     Query(q): Query<UserEventsQuery>,
 ) -> AppResult<Json<Value>> {
@@ -202,6 +214,7 @@ pub async fn events(
         .db
         .as_ref()
         .ok_or_else(|| AppError::Internal("database not connected".into()))?;
+    check_project_access(db, &current_user, q.project_id).await?;
 
     let mut cursor = models::TrackEvent::find()
         .filter(models::track_event::Column::ProjectId.eq(q.project_id))
@@ -217,7 +230,7 @@ pub async fn events(
         cursor = cursor.filter(models::track_event::Column::CreatedAt.lte(end));
     }
 
-    let page_size = q.page_size.max(1);
+    let page_size = q.page_size.clamp(1, 100);
     let paginator = cursor
         .order_by_desc(models::track_event::Column::CreatedAt)
         .paginate(db, page_size);
@@ -246,6 +259,7 @@ fn parse_filters(raw: Option<&str>) -> AppResult<Vec<PropertyFilter>> {
         .map_err(|_| AppError::BadRequest("filters must be a JSON array".into()))
 }
 
+#[cfg(test)]
 fn keyword_matches(row: &models::track_user_profile::Model, keyword: &str) -> bool {
     if keyword.is_empty() {
         return true;
@@ -366,5 +380,237 @@ impl From<models::track_event::Model> for TrackEventDto {
             client_time: row.client_time,
             created_at: row.created_at,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_user_list_query_defaults() {
+        let q: UserListQuery = serde_json::from_str(r#"{"project_id":1}"#).unwrap();
+        assert_eq!(q.project_id, 1);
+        assert_eq!(q.page, 1);
+        assert_eq!(q.page_size, 20);
+        assert!(q.keyword.is_none());
+        assert!(q.filters.is_none());
+    }
+
+    #[test]
+    fn test_user_list_query_custom() {
+        let q: UserListQuery =
+            serde_json::from_str(r#"{"project_id":1,"page":2,"page_size":50,"keyword":"test"}"#)
+                .unwrap();
+        assert_eq!(q.page, 2);
+        assert_eq!(q.page_size, 50);
+        assert_eq!(q.keyword.as_deref(), Some("test"));
+    }
+
+    #[test]
+    fn test_user_events_query_defaults() {
+        let q: UserEventsQuery = serde_json::from_str(r#"{"project_id":1}"#).unwrap();
+        assert_eq!(q.page, 1);
+        assert_eq!(q.page_size, 20);
+        assert!(q.event_name.is_none());
+    }
+
+    #[test]
+    fn test_property_matches_eq() {
+        let filter = PropertyFilter {
+            property: "name".into(),
+            operator: "eq".into(),
+            value: Some(json!("Alice")),
+        };
+        let props = json!({"name": "Alice"});
+        assert!(property_matches(&props, &filter));
+    }
+
+    #[test]
+    fn test_property_matches_eq_not_equal() {
+        let filter = PropertyFilter {
+            property: "name".into(),
+            operator: "eq".into(),
+            value: Some(json!("Alice")),
+        };
+        let props = json!({"name": "Bob"});
+        assert!(!property_matches(&props, &filter));
+    }
+
+    #[test]
+    fn test_property_matches_neq() {
+        let filter = PropertyFilter {
+            property: "name".into(),
+            operator: "neq".into(),
+            value: Some(json!("Alice")),
+        };
+        let props = json!({"name": "Bob"});
+        assert!(property_matches(&props, &filter));
+    }
+
+    #[test]
+    fn test_property_matches_contains() {
+        let filter = PropertyFilter {
+            property: "name".into(),
+            operator: "contains".into(),
+            value: Some(json!("li")),
+        };
+        let props = json!({"name": "Alice"});
+        assert!(property_matches(&props, &filter));
+    }
+
+    #[test]
+    fn test_property_matches_contains_case_insensitive() {
+        let filter = PropertyFilter {
+            property: "name".into(),
+            operator: "contains".into(),
+            value: Some(json!("ALICE")),
+        };
+        let props = json!({"name": "alice"});
+        assert!(property_matches(&props, &filter));
+    }
+
+    #[test]
+    fn test_property_matches_exists() {
+        let filter =
+            PropertyFilter { property: "name".into(), operator: "exists".into(), value: None };
+        let props = json!({"name": "Alice"});
+        assert!(property_matches(&props, &filter));
+    }
+
+    #[test]
+    fn test_property_matches_not_exists() {
+        let filter =
+            PropertyFilter { property: "age".into(), operator: "not_exists".into(), value: None };
+        let props = json!({"name": "Alice"});
+        assert!(property_matches(&props, &filter));
+    }
+
+    #[test]
+    fn test_property_matches_missing_property() {
+        let filter = PropertyFilter {
+            property: "age".into(),
+            operator: "eq".into(),
+            value: Some(json!(30)),
+        };
+        let props = json!({"name": "Alice"});
+        assert!(!property_matches(&props, &filter));
+    }
+
+    #[test]
+    fn test_value_to_string_string() {
+        assert_eq!(value_to_string(&json!("hello")), Some("hello".into()));
+    }
+
+    #[test]
+    fn test_value_to_string_number() {
+        assert_eq!(value_to_string(&json!(42)), Some("42".into()));
+    }
+
+    #[test]
+    fn test_value_to_string_bool() {
+        assert_eq!(value_to_string(&json!(true)), Some("true".into()));
+    }
+
+    #[test]
+    fn test_value_to_string_array() {
+        assert_eq!(value_to_string(&json!(["a", "b"])), Some("a,b".into()));
+    }
+
+    #[test]
+    fn test_value_to_string_null() {
+        assert_eq!(value_to_string(&json!(null)), None);
+    }
+
+    #[test]
+    fn test_parse_filters_empty() {
+        let filters = parse_filters(None).unwrap();
+        assert!(filters.is_empty());
+    }
+
+    #[test]
+    fn test_parse_filters_empty_string() {
+        let filters = parse_filters(Some("")).unwrap();
+        assert!(filters.is_empty());
+    }
+
+    #[test]
+    fn test_parse_filters_valid() {
+        let raw = r#"[{"property":"name","operator":"eq","value":"test"}]"#;
+        let filters = parse_filters(Some(raw)).unwrap();
+        assert_eq!(filters.len(), 1);
+        assert_eq!(filters[0].property, "name");
+    }
+
+    #[test]
+    fn test_parse_filters_invalid_json() {
+        let result = parse_filters(Some("not json"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_time_empty() {
+        assert!(parse_time(None).unwrap().is_none());
+        assert!(parse_time(Some("")).unwrap().is_none());
+        assert!(parse_time(Some("  ")).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_parse_time_valid() {
+        let dt = parse_time(Some("2024-01-15T10:30:00Z")).unwrap();
+        assert!(dt.is_some());
+    }
+
+    #[test]
+    fn test_parse_time_invalid() {
+        let result = parse_time(Some("not-a-date"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_keyword_matches_empty() {
+        use chrono::Utc;
+        let row = models::track_user_profile::Model {
+            id: 1,
+            project_id: 1,
+            distinct_id: "user1".into(),
+            anonymous_id: None,
+            user_id: None,
+            name: None,
+            email: None,
+            phone: None,
+            properties: json!({}),
+            first_visit_at: None,
+            last_visit_at: None,
+            total_events: 0,
+            total_sessions: 0,
+            created_at: Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()),
+            updated_at: Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()),
+        };
+        assert!(keyword_matches(&row, ""));
+    }
+
+    #[test]
+    fn test_keyword_matches_distinct_id() {
+        use chrono::Utc;
+        let row = models::track_user_profile::Model {
+            id: 1,
+            project_id: 1,
+            distinct_id: "user_abc".into(),
+            anonymous_id: None,
+            user_id: None,
+            name: None,
+            email: None,
+            phone: None,
+            properties: json!({}),
+            first_visit_at: None,
+            last_visit_at: None,
+            total_events: 0,
+            total_sessions: 0,
+            created_at: Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()),
+            updated_at: Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()),
+        };
+        assert!(keyword_matches(&row, "abc"));
+        assert!(!keyword_matches(&row, "xyz"));
     }
 }

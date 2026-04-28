@@ -23,19 +23,34 @@ async fn main() -> anyhow::Result<()> {
     let cfg = Config::from_env().context("failed to load config from env")?;
     tracing::info!(port = cfg.server_port, "starting monitor-server");
 
+    // CORS 安全校验
+    if cfg.cors_origins.is_empty() {
+        tracing::error!(
+            "CORS_ORIGINS is not set. For security, the server refuses to start with open CORS."
+        );
+        return Err(anyhow::anyhow!("CORS_ORIGINS must be configured"));
+    }
+
+    // JWT secret 长度校验
+    if cfg.jwt_secret.len() < 32 {
+        tracing::error!("JWT_SECRET is too short (minimum 32 bytes)");
+        return Err(anyhow::anyhow!("JWT_SECRET must be at least 32 bytes"));
+    }
+
     // 数据库连接
     let db_conn = match db::connect(&cfg.database_url).await {
         Ok(conn) => {
             tracing::info!("database connected");
-            match Migrator::up(&conn, None).await {
-                Ok(_) => tracing::info!("database migrations applied"),
-                Err(e) => tracing::warn!(error = %e, "database migration failed"),
+            if let Err(e) = Migrator::up(&conn, None).await {
+                tracing::error!(error = %e, "database migration failed, aborting startup");
+                return Err(anyhow::anyhow!("database migration failed: {}", e));
             }
+            tracing::info!("database migrations applied");
             Some(conn)
         }
         Err(e) => {
-            tracing::warn!(error = %e, "database connection failed, running without DB");
-            None
+            tracing::error!(error = %e, "database connection failed, aborting startup");
+            return Err(anyhow::anyhow!("database connection failed: {}", e));
         }
     };
 
@@ -66,11 +81,25 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!(error = %e, dir = %cfg.sourcemap_dir, "failed to create sourcemap dir");
     }
 
-    let state = router::AppState {
-        config: cfg.clone(),
-        db: db_conn,
-        alert_tx,
+    // Redis 连接池（用于限流等）
+    let redis_conn = match redis::Client::open(cfg.redis_url.as_str()) {
+        Ok(client) => match client.get_multiplexed_async_connection().await {
+            Ok(conn) => {
+                tracing::info!("redis connected");
+                Some(conn)
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "redis connection failed, rate limiting disabled");
+                None
+            }
+        },
+        Err(e) => {
+            tracing::warn!(error = %e, "invalid redis URL, rate limiting disabled");
+            None
+        }
     };
+
+    let state = router::AppState { config: cfg.clone(), db: db_conn, alert_tx, redis: redis_conn };
 
     let app = router::build_router(state);
 

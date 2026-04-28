@@ -8,9 +8,7 @@
 //! 在 main.rs 中以 tokio::spawn 独立任务运行。
 
 use chrono::{DateTime, Duration, FixedOffset, TimeZone, Utc};
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use tracing::{info, warn};
@@ -29,8 +27,7 @@ pub async fn start_aggregation_loop(db: DatabaseConnection) {
 
 /// 执行一次预聚合。
 async fn run_aggregation(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr> {
-    let since = (Utc::now() - Duration::hours(2))
-        .with_timezone(&FixedOffset::east_opt(0).unwrap());
+    let since = (Utc::now() - Duration::hours(2)).with_timezone(&FixedOffset::east_opt(0).unwrap());
 
     let rows = models::TrackEvent::find()
         .filter(models::track_event::Column::CreatedAt.gte(since))
@@ -105,4 +102,61 @@ async fn run_aggregation(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr> 
 fn truncate_to_hour(dt: DateTime<FixedOffset>) -> i64 {
     let ts = dt.timestamp();
     ts - (ts % 3600)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_truncate_to_hour_exact() {
+        let dt = Utc
+            .with_ymd_and_hms(2024, 1, 15, 10, 0, 0)
+            .unwrap()
+            .with_timezone(&FixedOffset::east_opt(0).unwrap());
+        let ts = truncate_to_hour(dt);
+        let expected = Utc
+            .with_ymd_and_hms(2024, 1, 15, 10, 0, 0)
+            .unwrap()
+            .timestamp();
+        assert_eq!(ts, expected);
+    }
+
+    #[test]
+    fn test_truncate_to_hour_with_minutes() {
+        let dt = Utc
+            .with_ymd_and_hms(2024, 1, 15, 10, 30, 45)
+            .unwrap()
+            .with_timezone(&FixedOffset::east_opt(0).unwrap());
+        let ts = truncate_to_hour(dt);
+        let expected = Utc
+            .with_ymd_and_hms(2024, 1, 15, 10, 0, 0)
+            .unwrap()
+            .timestamp();
+        assert_eq!(ts, expected);
+    }
+
+    #[test]
+    fn test_truncate_to_hour_crosses_day() {
+        let dt = Utc
+            .with_ymd_and_hms(2024, 1, 15, 23, 59, 59)
+            .unwrap()
+            .with_timezone(&FixedOffset::east_opt(0).unwrap());
+        let ts = truncate_to_hour(dt);
+        let expected = Utc
+            .with_ymd_and_hms(2024, 1, 15, 23, 0, 0)
+            .unwrap()
+            .timestamp();
+        assert_eq!(ts, expected);
+    }
+
+    #[test]
+    fn test_truncate_to_hour_epoch() {
+        let dt = Utc
+            .with_ymd_and_hms(1970, 1, 1, 0, 0, 0)
+            .unwrap()
+            .with_timezone(&FixedOffset::east_opt(0).unwrap());
+        let ts = truncate_to_hour(dt);
+        assert_eq!(ts, 0);
+    }
 }

@@ -20,13 +20,37 @@ impl MigrationTrait for Migration {
                             .auto_increment()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(TrackEventDefinitions::ProjectId).integer().not_null())
-                    .col(ColumnDef::new(TrackEventDefinitions::EventName).string_len(128).not_null())
-                    .col(ColumnDef::new(TrackEventDefinitions::DisplayName).string_len(128).null())
-                    .col(ColumnDef::new(TrackEventDefinitions::Category).string_len(50).null())
-                    .col(ColumnDef::new(TrackEventDefinitions::Description).text().null())
+                    .col(
+                        ColumnDef::new(TrackEventDefinitions::ProjectId)
+                            .integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(TrackEventDefinitions::EventName)
+                            .string_len(128)
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(TrackEventDefinitions::DisplayName)
+                            .string_len(128)
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(TrackEventDefinitions::Category)
+                            .string_len(50)
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(TrackEventDefinitions::Description)
+                            .text()
+                            .null(),
+                    )
                     // properties: [{name, type, description, required}]
-                    .col(ColumnDef::new(TrackEventDefinitions::Properties).json_binary().null())
+                    .col(
+                        ColumnDef::new(TrackEventDefinitions::Properties)
+                            .json_binary()
+                            .null(),
+                    )
                     .col(
                         ColumnDef::new(TrackEventDefinitions::Status)
                             .string_len(20)

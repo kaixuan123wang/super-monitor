@@ -27,13 +27,21 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(JsErrors::AppId).string_len(32).not_null())
                     .col(ColumnDef::new(JsErrors::Message).text().not_null())
                     .col(ColumnDef::new(JsErrors::Stack).text().null())
-                    .col(ColumnDef::new(JsErrors::ErrorType).string_len(50).not_null())
+                    .col(
+                        ColumnDef::new(JsErrors::ErrorType)
+                            .string_len(50)
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(JsErrors::SourceUrl).string_len(500).null())
                     .col(ColumnDef::new(JsErrors::Line).integer().null())
                     .col(ColumnDef::new(JsErrors::Column).integer().null())
                     .col(ColumnDef::new(JsErrors::UserAgent).string_len(500).null())
                     .col(ColumnDef::new(JsErrors::Browser).string_len(50).null())
-                    .col(ColumnDef::new(JsErrors::BrowserVersion).string_len(30).null())
+                    .col(
+                        ColumnDef::new(JsErrors::BrowserVersion)
+                            .string_len(30)
+                            .null(),
+                    )
                     .col(ColumnDef::new(JsErrors::Os).string_len(50).null())
                     .col(ColumnDef::new(JsErrors::OsVersion).string_len(30).null())
                     .col(ColumnDef::new(JsErrors::Device).string_len(50).null())
@@ -41,7 +49,11 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(JsErrors::Url).string_len(500).null())
                     .col(ColumnDef::new(JsErrors::Referrer).string_len(500).null())
                     .col(ColumnDef::new(JsErrors::Viewport).string_len(30).null())
-                    .col(ColumnDef::new(JsErrors::ScreenResolution).string_len(30).null())
+                    .col(
+                        ColumnDef::new(JsErrors::ScreenResolution)
+                            .string_len(30)
+                            .null(),
+                    )
                     .col(ColumnDef::new(JsErrors::Language).string_len(10).null())
                     .col(ColumnDef::new(JsErrors::Timezone).string_len(50).null())
                     .col(ColumnDef::new(JsErrors::Breadcrumb).json_binary().null())

@@ -1,29 +1,23 @@
 //! 项目管理接口。
-//!
-//! Phase 2 暂未接入认证（Phase 5 补 JWT 中间件），所有请求默认 owner_id = 1。
-//! 当 `users`/`groups` 表为空时，会创建一个默认的 owner/group 占位，确保
-//! 前端能在 Phase 2 验收阶段正常调试。
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Extension, Path, Query, State},
     Json,
 };
-use chrono::{DateTime, FixedOffset, Utc};
+use chrono::{DateTime, FixedOffset};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, EntityTrait, PaginatorTrait,
+    QueryFilter, QueryOrder, Set,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
+use crate::middleware::auth::{check_project_access, CurrentUser};
 use crate::models;
 use crate::router::AppState;
-
-fn now_fixed() -> DateTime<FixedOffset> {
-    Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap())
-}
+use crate::utils::{get_db, now_fixed};
 
 #[derive(Debug, Deserialize)]
 pub struct ListQuery {
@@ -72,6 +66,7 @@ pub struct ProjectDto {
     pub id: i32,
     pub name: String,
     pub app_id: String,
+    #[serde(skip_serializing)]
     pub app_key: String,
     pub group_id: i32,
     pub owner_id: i32,
@@ -106,19 +101,35 @@ impl From<models::project::Model> for ProjectDto {
 
 pub async fn list(
     State(state): State<AppState>,
+    Extension(current_user): Extension<CurrentUser>,
     Query(q): Query<ListQuery>,
 ) -> AppResult<Json<Value>> {
     let db = get_db(&state)?;
     let mut cursor = models::Project::find();
+
+    // 非 super_admin 只能看自己 owner 或同 group 的项目
+    if current_user.role != "super_admin" {
+        let user = models::User::find_by_id(current_user.id)
+            .one(db)
+            .await?
+            .ok_or(AppError::Unauthorized)?;
+        let mut cond = Condition::any().add(models::project::Column::OwnerId.eq(current_user.id));
+        if let Some(gid) = user.group_id {
+            cond = cond.add(models::project::Column::GroupId.eq(gid));
+        }
+        cursor = cursor.filter(cond);
+    }
+
     if let Some(gid) = q.group_id {
         cursor = cursor.filter(models::project::Column::GroupId.eq(gid));
     }
     if let Some(kw) = q.keyword.as_ref().filter(|s| !s.is_empty()) {
         cursor = cursor.filter(models::project::Column::Name.contains(kw));
     }
+    let page_size = q.page_size.clamp(1, 100);
     let paginator = cursor
         .order_by_desc(models::project::Column::Id)
-        .paginate(db, q.page_size);
+        .paginate(db, page_size);
     let total = paginator.num_items().await?;
     let items = paginator.fetch_page(q.page.saturating_sub(1)).await?;
     let list: Vec<ProjectDto> = items.into_iter().map(Into::into).collect();
@@ -129,18 +140,20 @@ pub async fn list(
         "data": { "list": list, "total": total },
         "pagination": {
             "page": q.page,
-            "page_size": q.page_size,
+            "page_size": page_size,
             "total": total,
-            "total_pages": (total as f64 / q.page_size as f64).ceil() as u64
+            "total_pages": (total as f64 / page_size as f64).ceil() as u64
         }
     })))
 }
 
 pub async fn detail(
     State(state): State<AppState>,
+    Extension(current_user): Extension<CurrentUser>,
     Path(id): Path<i32>,
 ) -> AppResult<Json<Value>> {
     let db = get_db(&state)?;
+    check_project_access(db, &current_user, id).await?;
     let item = models::Project::find_by_id(id)
         .one(db)
         .await?
@@ -150,22 +163,80 @@ pub async fn detail(
 
 pub async fn create(
     State(state): State<AppState>,
+    Extension(current_user): Extension<CurrentUser>,
     Json(body): Json<CreateProjectBody>,
 ) -> AppResult<Json<Value>> {
-    if body.name.trim().is_empty() {
+    let name = body.name.trim().to_string();
+    if name.is_empty() {
         return Err(AppError::BadRequest("project name is required".into()));
+    }
+    if name.len() > 100 {
+        return Err(AppError::BadRequest("project name must be at most 100 characters".into()));
     }
     let db = get_db(&state)?;
 
-    let (owner_id, group_id) = ensure_default_owner_group(db, body.group_id).await?;
+    // owner 为当前登录用户；group_id 必须由调用方传入（super_admin 可不传以自动取首个）
+    let owner_id = current_user.id;
+    let group_id = match body.group_id {
+        Some(gid) => {
+            let group = models::Group::find_by_id(gid)
+                .one(db)
+                .await?
+                .ok_or_else(|| AppError::BadRequest(format!("group {gid} not found")))?;
+
+            if current_user.role != "super_admin" {
+                let user = models::User::find_by_id(current_user.id)
+                    .one(db)
+                    .await?
+                    .ok_or(AppError::Unauthorized)?;
+                if user.group_id != Some(group.id) {
+                    return Err(AppError::Forbidden);
+                }
+            }
+
+            group.id
+        }
+        None => {
+            // 尝试取当前用户的 group_id
+            let user = models::User::find_by_id(current_user.id)
+                .one(db)
+                .await?
+                .ok_or(AppError::Unauthorized)?;
+            match user.group_id {
+                Some(gid) => gid,
+                None => {
+                    // super_admin 且无 group 时自动取第一个 group
+                    if current_user.role == "super_admin" {
+                        models::Group::find()
+                            .order_by_asc(crate::models::group::Column::Id)
+                            .one(db)
+                            .await?
+                            .ok_or_else(|| {
+                                AppError::BadRequest(
+                                    "no group exists, please create a group first".into(),
+                                )
+                            })?
+                            .id
+                    } else {
+                        return Err(AppError::BadRequest("group_id is required".into()));
+                    }
+                }
+            }
+        }
+    };
 
     let app_id = Uuid::new_v4().simple().to_string();
     let app_key = Uuid::new_v4().simple().to_string()
-        + &Uuid::new_v4().simple().to_string().chars().take(32).collect::<String>();
+        + &Uuid::new_v4()
+            .simple()
+            .to_string()
+            .chars()
+            .take(32)
+            .collect::<String>();
 
     let active = models::project::ActiveModel {
         id: sea_orm::NotSet,
-        name: Set(body.name),
+        name: Set(name),
         app_id: Set(app_id),
         app_key: Set(app_key),
         group_id: Set(group_id),
@@ -184,10 +255,12 @@ pub async fn create(
 
 pub async fn update(
     State(state): State<AppState>,
+    Extension(current_user): Extension<CurrentUser>,
     Path(id): Path<i32>,
     Json(body): Json<UpdateProjectBody>,
 ) -> AppResult<Json<Value>> {
     let db = get_db(&state)?;
+    check_project_access(db, &current_user, id).await?;
     let item = models::Project::find_by_id(id)
         .one(db)
         .await?
@@ -218,9 +291,11 @@ pub async fn update(
 
 pub async fn remove(
     State(state): State<AppState>,
+    Extension(current_user): Extension<CurrentUser>,
     Path(id): Path<i32>,
 ) -> AppResult<Json<Value>> {
     let db = get_db(&state)?;
+    check_project_access(db, &current_user, id).await?;
     let res = models::Project::delete_by_id(id).exec(db).await?;
     if res.rows_affected == 0 {
         return Err(AppError::NotFound);
@@ -229,6 +304,7 @@ pub async fn remove(
 }
 
 /// 在 users/groups 表为空时创建占位数据，返回 (owner_id, group_id)。
+#[allow(dead_code)]
 async fn ensure_default_owner_group(
     db: &DatabaseConnection,
     requested_group: Option<i32>,
@@ -244,11 +320,14 @@ async fn ensure_default_owner_group(
     let owner_id = match owner {
         Some(u) => u.id,
         None => {
+            let random_password = Uuid::new_v4().to_string();
+            let hash = bcrypt::hash(&random_password, bcrypt::DEFAULT_COST)
+                .map_err(|e| AppError::Internal(format!("default admin hash failed: {e}")))?;
             let u = models::user::ActiveModel {
                 id: sea_orm::NotSet,
                 username: Set("admin".into()),
                 email: Set("admin@local".into()),
-                password_hash: Set("!".into()),
+                password_hash: Set(hash),
                 role: Set("super_admin".into()),
                 group_id: Set(None),
                 avatar: Set(None),
@@ -256,6 +335,15 @@ async fn ensure_default_owner_group(
                 created_at: Set(now_fixed()),
                 updated_at: Set(now_fixed()),
             };
+            tracing::warn!(
+                "Created default admin user (username: admin). Initial password printed to stderr."
+            );
+            eprintln!("\n========================================");
+            eprintln!("SECURITY NOTICE: Default admin user created.");
+            eprintln!("Username: admin");
+            eprintln!("Password: {random_password}");
+            eprintln!("Please change this password immediately after first login.");
+            eprintln!("========================================\n");
             u.insert(db).await?.id
         }
     };
@@ -283,6 +371,7 @@ async fn ensure_default_owner_group(
     Ok((owner_id, group_id))
 }
 
+#[allow(dead_code)]
 async fn create_default_group(db: &DatabaseConnection, owner_id: i32) -> AppResult<i32> {
     let g = models::group::ActiveModel {
         id: sea_orm::NotSet,
@@ -295,13 +384,87 @@ async fn create_default_group(db: &DatabaseConnection, owner_id: i32) -> AppResu
     Ok(g.insert(db).await?.id)
 }
 
-fn get_db(state: &AppState) -> AppResult<&DatabaseConnection> {
-    state
-        .db
-        .as_ref()
-        .ok_or_else(|| AppError::Internal("database not connected".into()))
-}
-
 fn ok<T: Serialize>(data: T) -> Value {
     json!({ "code": 0, "message": "ok", "data": data })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_project_dto_skips_app_key() {
+        let dto = ProjectDto {
+            id: 1,
+            name: "test".into(),
+            app_id: "id123".into(),
+            app_key: "secret_key".into(),
+            group_id: 1,
+            owner_id: 1,
+            description: None,
+            alert_threshold: 10,
+            alert_webhook: None,
+            data_retention_days: 30,
+            environment: "production".into(),
+            created_at: now_fixed(),
+            updated_at: now_fixed(),
+        };
+        let json_str = serde_json::to_string(&dto).unwrap();
+        assert!(!json_str.contains("secret_key"));
+        assert!(json_str.contains("id123"));
+    }
+
+    #[test]
+    fn test_create_project_body_defaults() {
+        let json_str = r#"{"name":"test project"}"#;
+        let body: CreateProjectBody = serde_json::from_str(json_str).unwrap();
+        assert_eq!(body.name, "test project");
+        assert!(body.group_id.is_none());
+        assert!(body.description.is_none());
+        assert!(body.alert_threshold.is_none());
+        assert!(body.data_retention_days.is_none());
+        assert!(body.environment.is_none());
+    }
+
+    #[test]
+    fn test_create_project_body_full() {
+        let json_str = r#"{"name":"test","group_id":1,"description":"desc","alert_threshold":5,"data_retention_days":90,"environment":"staging"}"#;
+        let body: CreateProjectBody = serde_json::from_str(json_str).unwrap();
+        assert_eq!(body.group_id, Some(1));
+        assert_eq!(body.alert_threshold, Some(5));
+        assert_eq!(body.data_retention_days, Some(90));
+        assert_eq!(body.environment.as_deref(), Some("staging"));
+    }
+
+    #[test]
+    fn test_update_project_body_all_optional() {
+        let json_str = r#"{}"#;
+        let body: UpdateProjectBody = serde_json::from_str(json_str).unwrap();
+        assert!(body.name.is_none());
+        assert!(body.description.is_none());
+    }
+
+    #[test]
+    fn test_list_query_defaults() {
+        let q: ListQuery = serde_json::from_str(r#"{}"#).unwrap();
+        assert_eq!(q.page, 1);
+        assert_eq!(q.page_size, 20);
+        assert!(q.group_id.is_none());
+        assert!(q.keyword.is_none());
+    }
+
+    #[test]
+    fn test_ok_helper() {
+        let data = json!({"id": 1});
+        let result = ok(data);
+        assert_eq!(result["code"], 0);
+        assert_eq!(result["message"], "ok");
+        assert_eq!(result["data"]["id"], 1);
+    }
+
+    #[test]
+    fn test_now_fixed_is_utc() {
+        let now = now_fixed();
+        assert_eq!(now.offset().local_minus_utc(), 0);
+    }
 }

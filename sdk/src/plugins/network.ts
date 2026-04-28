@@ -116,7 +116,6 @@ export function installNetworkPlugin(options: NetworkPluginOptions): () => void 
           duration,
           request_body: reqBody,
           error_type: (e as Error)?.name || 'NetworkError',
-          response_text: (e as Error)?.message,
         });
         throw e;
       }

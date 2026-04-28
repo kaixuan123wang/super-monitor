@@ -1,17 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue';
+import { ref, onMounted, watch, nextTick } from 'vue';
 import { useProjectStore } from '@/stores/project';
 import { getEventAnalysis, listTrackEvents, type AnalysisSeries } from '@/api/tracking';
-import * as echarts from 'echarts/core';
-import { LineChart } from 'echarts/charts';
-import {
-  GridComponent,
-  TooltipComponent,
-  LegendComponent,
-} from 'echarts/components';
-import { CanvasRenderer } from 'echarts/renderers';
-
-echarts.use([LineChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
+import { useChart } from '@/composables/useChart';
 
 const projectStore = useProjectStore();
 
@@ -23,7 +14,7 @@ const metric = ref<'pv' | 'uv'>('pv');
 const groupBy = ref('');
 
 const chartRef = ref<HTMLDivElement>();
-let chart: echarts.ECharts | null = null;
+const chart = useChart(chartRef);
 
 const tableData = ref<{ name: string; data: number[]; total: number }[]>([]);
 const dates = ref<string[]>([]);
@@ -44,7 +35,9 @@ async function loadEventOptions() {
     if (eventOptions.value.length && !selectedEvents.value.length) {
       selectedEvents.value = [eventOptions.value[0]];
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 async function query() {
@@ -73,32 +66,35 @@ async function query() {
 }
 
 function renderChart(series: AnalysisSeries[]) {
-  if (!chartRef.value) return;
-  if (!chart) chart = echarts.init(chartRef.value);
-  chart.setOption({
-    tooltip: { trigger: 'axis' },
-    legend: { bottom: 0, type: 'scroll' },
-    grid: { left: 50, right: 20, top: 20, bottom: 50 },
-    xAxis: { type: 'category', data: dates.value, axisLabel: { fontSize: 11 } },
-    yAxis: { type: 'value', minInterval: 1 },
-    series: series.map((s) => ({
-      name: s.name,
-      type: 'line',
-      data: s.data,
-      smooth: true,
-    })),
-  });
+  chart.setOption(
+    {
+      tooltip: { trigger: 'axis' },
+      legend: { bottom: 0, type: 'scroll' },
+      grid: { left: 50, right: 20, top: 20, bottom: 50 },
+      xAxis: { type: 'category', data: dates.value, axisLabel: { fontSize: 11 } },
+      yAxis: { type: 'value', minInterval: 1 },
+      series: series.map((s) => ({
+        name: s.name,
+        type: 'line',
+        data: s.data,
+        smooth: true,
+      })),
+    },
+    true
+  );
 }
 
 onMounted(async () => {
   await loadEventOptions();
   if (selectedEvents.value.length) query();
 });
-onUnmounted(() => chart?.dispose());
-watch(() => projectStore.currentId, async () => {
-  await loadEventOptions();
-  query();
-});
+watch(
+  () => projectStore.currentId,
+  async () => {
+    await loadEventOptions();
+    query();
+  }
+);
 </script>
 
 <template>

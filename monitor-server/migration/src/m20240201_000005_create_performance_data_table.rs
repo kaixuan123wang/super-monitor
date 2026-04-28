@@ -18,28 +18,76 @@ impl MigrationTrait for Migration {
                             .auto_increment()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(PerformanceData::ProjectId).integer().not_null())
-                    .col(ColumnDef::new(PerformanceData::AppId).string_len(32).not_null())
+                    .col(
+                        ColumnDef::new(PerformanceData::ProjectId)
+                            .integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(PerformanceData::AppId)
+                            .string_len(32)
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(PerformanceData::Url).string_len(500).null())
                     .col(ColumnDef::new(PerformanceData::Fp).integer().null())
                     .col(ColumnDef::new(PerformanceData::Fcp).integer().null())
                     .col(ColumnDef::new(PerformanceData::Lcp).integer().null())
-                    .col(ColumnDef::new(PerformanceData::Cls).decimal_len(10, 4).null())
+                    .col(
+                        ColumnDef::new(PerformanceData::Cls)
+                            .decimal_len(10, 4)
+                            .null(),
+                    )
                     .col(ColumnDef::new(PerformanceData::Ttfb).integer().null())
                     .col(ColumnDef::new(PerformanceData::Fid).integer().null())
                     .col(ColumnDef::new(PerformanceData::LoadTime).integer().null())
                     .col(ColumnDef::new(PerformanceData::DnsTime).integer().null())
                     .col(ColumnDef::new(PerformanceData::TcpTime).integer().null())
                     .col(ColumnDef::new(PerformanceData::SslTime).integer().null())
-                    .col(ColumnDef::new(PerformanceData::DomParseTime).integer().null())
-                    .col(ColumnDef::new(PerformanceData::ResourceCount).integer().null())
-                    .col(ColumnDef::new(PerformanceData::ResourceSize).big_integer().null())
-                    .col(ColumnDef::new(PerformanceData::UserAgent).string_len(500).null())
-                    .col(ColumnDef::new(PerformanceData::Browser).string_len(50).null())
-                    .col(ColumnDef::new(PerformanceData::DeviceType).string_len(20).null())
-                    .col(ColumnDef::new(PerformanceData::SdkVersion).string_len(20).null())
-                    .col(ColumnDef::new(PerformanceData::Release).string_len(50).null())
-                    .col(ColumnDef::new(PerformanceData::Environment).string_len(20).null())
+                    .col(
+                        ColumnDef::new(PerformanceData::DomParseTime)
+                            .integer()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(PerformanceData::ResourceCount)
+                            .integer()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(PerformanceData::ResourceSize)
+                            .big_integer()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(PerformanceData::UserAgent)
+                            .string_len(500)
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(PerformanceData::Browser)
+                            .string_len(50)
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(PerformanceData::DeviceType)
+                            .string_len(20)
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(PerformanceData::SdkVersion)
+                            .string_len(20)
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(PerformanceData::Release)
+                            .string_len(50)
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(PerformanceData::Environment)
+                            .string_len(20)
+                            .null(),
+                    )
                     .col(
                         ColumnDef::new(PerformanceData::CreatedAt)
                             .timestamp_with_time_zone()

@@ -6,27 +6,29 @@
  *   // 卸载时调用 cleanup()
  */
 
-import type { TrackingConfig } from '../types';
+import type { SanitizeConfig, TrackingConfig } from '../types';
+import { sanitizeUrl } from '../core/utils';
 
 export interface AutoTrackOptions {
   /** 触发埋点事件的回调（由 Monitor 注入） */
   track: (event: string, properties: Record<string, unknown>, priority?: 'P0' | 'P1') => void;
   config?: TrackingConfig;
+  sanitize?: SanitizeConfig;
 }
 
 export function installAutoTrackPlugin(options: AutoTrackOptions): () => void {
-  const { track, config } = options;
+  const { track, config, sanitize } = options;
   const autoTrack = config?.autoTrack ?? { pageView: true, click: true, pageLeave: true };
   const cleanups: Array<() => void> = [];
 
   if (autoTrack.pageView !== false) {
-    cleanups.push(installPageView(track));
+    cleanups.push(installPageView(track, sanitize));
   }
   if (autoTrack.click !== false) {
-    cleanups.push(installElementClick(track));
+    cleanups.push(installElementClick(track, sanitize));
   }
   if (autoTrack.pageLeave !== false) {
-    cleanups.push(installPageLeave(track));
+    cleanups.push(installPageLeave(track, sanitize));
   }
 
   return () => cleanups.forEach((fn) => fn());
@@ -34,9 +36,13 @@ export function installAutoTrackPlugin(options: AutoTrackOptions): () => void {
 
 // ── $page_view ────────────────────────────────────────────────────────────────
 
-function installPageView(track: AutoTrackOptions['track']): () => void {
+function safeCurrentUrl(sanitize?: SanitizeConfig): string {
+  return sanitizeUrl(location.href, sanitize?.sensitiveQueryKeys);
+}
+
+function installPageView(track: AutoTrackOptions['track'], sanitize?: SanitizeConfig): () => void {
   // 立即上报当前页面
-  firePageView(track);
+  firePageView(track, sanitize);
 
   // SPA：监听 popstate + hashchange；同时用 MutationObserver 检测 URL 变化
   let lastUrl = location.href;
@@ -44,35 +50,35 @@ function installPageView(track: AutoTrackOptions['track']): () => void {
   const handleNav = () => {
     if (location.href !== lastUrl) {
       lastUrl = location.href;
-      firePageView(track);
+      firePageView(track, sanitize);
     }
   };
 
   window.addEventListener('popstate', handleNav);
   window.addEventListener('hashchange', handleNav);
 
-  // 拦截 history.pushState / replaceState
-  const origPush = history.pushState.bind(history);
-  const origReplace = history.replaceState.bind(history);
+  // 拦截 history.pushState / replaceState — 保存当前引用以链式调用
+  const prevPush = history.pushState;
+  const prevReplace = history.replaceState;
 
   history.pushState = function (...args) {
-    origPush(...args);
+    prevPush.apply(this, args);
     handleNav();
   };
   history.replaceState = function (...args) {
-    origReplace(...args);
+    prevReplace.apply(this, args);
     handleNav();
   };
 
   return () => {
     window.removeEventListener('popstate', handleNav);
     window.removeEventListener('hashchange', handleNav);
-    history.pushState = origPush;
-    history.replaceState = origReplace;
+    history.pushState = prevPush;
+    history.replaceState = prevReplace;
   };
 }
 
-function firePageView(track: AutoTrackOptions['track']): void {
+function firePageView(track: AutoTrackOptions['track'], sanitize?: SanitizeConfig): void {
   let isFirstVisit = false;
   let isFirstDay = false;
   try {
@@ -85,7 +91,7 @@ function firePageView(track: AutoTrackOptions['track']): void {
   }
 
   track('$page_view', {
-    $page_url: location.href,
+    $page_url: safeCurrentUrl(sanitize),
     $page_title: document.title,
     $referrer: document.referrer || undefined,
     $viewport_width: window.innerWidth,
@@ -99,7 +105,7 @@ function firePageView(track: AutoTrackOptions['track']): void {
 
 const INTERACTIVE_TAGS = new Set(['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'LABEL']);
 
-function installElementClick(track: AutoTrackOptions['track']): () => void {
+function installElementClick(track: AutoTrackOptions['track'], sanitize?: SanitizeConfig): () => void {
   const handler = (e: MouseEvent) => {
     const target = findInteractiveTarget(e.target as Element | null);
     if (!target) return;
@@ -111,7 +117,7 @@ function installElementClick(track: AutoTrackOptions['track']): () => void {
       $element_name: (target as HTMLElement).getAttribute('name') || undefined,
       $element_content: getTextContent(target),
       $element_path: getElementPath(target),
-      $page_url: location.href,
+      $page_url: safeCurrentUrl(sanitize),
       $page_x: e.pageX,
       $page_y: e.pageY,
     });
@@ -157,30 +163,64 @@ function getElementPath(el: Element): string {
 
 // ── $page_leave ───────────────────────────────────────────────────────────────
 
-function installPageLeave(track: AutoTrackOptions['track']): () => void {
-  const enterTime = Date.now();
+function installPageLeave(track: AutoTrackOptions['track'], sanitize?: SanitizeConfig): () => void {
+  let enterTime = Date.now();
   let fired = false;
+  let currentPageUrl = location.href;
 
   const fire = (reason: string) => {
     if (fired) return;
     fired = true;
     const duration = (Date.now() - enterTime) / 1000;
-    track('$page_leave', {
-      $page_url: location.href,
-      $page_title: document.title,
-      $stay_duration: Math.round(duration * 10) / 10,
-      $leave_reason: reason,
-    }, 'P0');
+    track(
+      '$page_leave',
+      {
+        $page_url: sanitizeUrl(currentPageUrl, sanitize?.sensitiveQueryKeys),
+        $page_title: document.title,
+        $stay_duration: Math.round(duration * 10) / 10,
+        $leave_reason: reason,
+      },
+      'P0'
+    );
   };
 
   const handleBeforeUnload = () => fire('unload');
   const handlePageHide = () => fire('pagehide');
 
+  // SPA 路由切换时触发 leave 并重置状态
+  const handleNavLeave = () => {
+    if (location.href !== currentPageUrl) {
+      fire('route_change');
+      // 重置状态，为新页面准备
+      fired = false;
+      enterTime = Date.now();
+      currentPageUrl = location.href;
+    }
+  };
+
   window.addEventListener('beforeunload', handleBeforeUnload);
   window.addEventListener('pagehide', handlePageHide);
+  window.addEventListener('popstate', handleNavLeave);
+  window.addEventListener('hashchange', handleNavLeave);
+
+  // 拦截 history.pushState / replaceState（与 installPageView 对称）
+  const prevPush = history.pushState;
+  const prevReplace = history.replaceState;
+  history.pushState = function (...args) {
+    prevPush.apply(this, args);
+    handleNavLeave();
+  };
+  history.replaceState = function (...args) {
+    prevReplace.apply(this, args);
+    handleNavLeave();
+  };
 
   return () => {
     window.removeEventListener('beforeunload', handleBeforeUnload);
     window.removeEventListener('pagehide', handlePageHide);
+    window.removeEventListener('popstate', handleNavLeave);
+    window.removeEventListener('hashchange', handleNavLeave);
+    history.pushState = prevPush;
+    history.replaceState = prevReplace;
   };
 }

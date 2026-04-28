@@ -5,9 +5,10 @@
 
 pub mod config;
 pub mod db;
-pub mod router;
-pub mod middleware;
-pub mod handlers;
-pub mod services;
-pub mod models;
 pub mod error;
+pub mod handlers;
+pub mod middleware;
+pub mod models;
+pub mod router;
+pub mod services;
+pub mod utils;

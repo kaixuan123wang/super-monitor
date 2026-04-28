@@ -11,12 +11,18 @@ export interface CurrentUser {
 
 export const useUserStore = defineStore('user', () => {
   const token = ref<string>(localStorage.getItem('__monitor_access_token') ?? '');
+  const refreshToken = ref<string>(localStorage.getItem('__monitor_refresh_token') ?? '');
   const user = ref<CurrentUser | null>(null);
 
   const isLoggedIn = computed(() => !!token.value);
 
-  function setToken(t: string) {
-    token.value = t;
+  function setToken(accessToken: string, refresh?: string) {
+    token.value = accessToken;
+    localStorage.setItem('__monitor_access_token', accessToken);
+    if (refresh) {
+      refreshToken.value = refresh;
+      localStorage.setItem('__monitor_refresh_token', refresh);
+    }
   }
 
   function setUser(u: CurrentUser | null) {
@@ -25,10 +31,11 @@ export const useUserStore = defineStore('user', () => {
 
   function reset() {
     token.value = '';
+    refreshToken.value = '';
     user.value = null;
     localStorage.removeItem('__monitor_access_token');
     localStorage.removeItem('__monitor_refresh_token');
   }
 
-  return { token, user, isLoggedIn, setToken, setUser, reset };
+  return { token, refreshToken, user, isLoggedIn, setToken, setUser, reset };
 });

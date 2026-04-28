@@ -40,7 +40,11 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default(10),
                     )
-                    .col(ColumnDef::new(Projects::AlertWebhook).string_len(500).null())
+                    .col(
+                        ColumnDef::new(Projects::AlertWebhook)
+                            .string_len(500)
+                            .null(),
+                    )
                     .col(
                         ColumnDef::new(Projects::DataRetentionDays)
                             .integer()
@@ -81,7 +85,11 @@ impl MigrationTrait for Migration {
                             .auto_increment()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(ProjectMembers::ProjectId).integer().not_null())
+                    .col(
+                        ColumnDef::new(ProjectMembers::ProjectId)
+                            .integer()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(ProjectMembers::UserId).integer().not_null())
                     .col(
                         ColumnDef::new(ProjectMembers::Role)

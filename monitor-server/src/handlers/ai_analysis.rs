@@ -1,15 +1,16 @@
 //! AI 分析触发 / 结果获取接口。
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Extension, Path, Query, State},
     Json,
 };
 use chrono::{Duration, FixedOffset, Utc};
-use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
+use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::error::{AppError, AppResult};
+use crate::middleware::auth::{check_project_access, CurrentUser};
 use crate::models;
 use crate::router::AppState;
 use crate::services::ai_service;
@@ -43,6 +44,7 @@ async fn ensure_project_rate_limit(
 
 pub async fn trigger(
     State(state): State<AppState>,
+    Extension(current_user): Extension<CurrentUser>,
     Path(error_id): Path<i64>,
 ) -> AppResult<Json<Value>> {
     let db = get_db(&state)?;
@@ -51,6 +53,7 @@ pub async fn trigger(
         .one(db)
         .await?
         .ok_or(AppError::NotFound)?;
+    check_project_access(db, &current_user, error.project_id).await?;
 
     ensure_project_rate_limit(db, error.project_id).await?;
 
@@ -88,9 +91,16 @@ pub async fn trigger(
 
 pub async fn get_result(
     State(state): State<AppState>,
+    Extension(current_user): Extension<CurrentUser>,
     Path(error_id): Path<i64>,
 ) -> AppResult<Json<Value>> {
     let db = get_db(&state)?;
+
+    let error = models::JsError::find_by_id(error_id)
+        .one(db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    check_project_access(db, &current_user, error.project_id).await?;
 
     let row = models::AiAnalysis::find()
         .filter(models::ai_analysis::Column::ErrorId.eq(error_id))
@@ -100,9 +110,7 @@ pub async fn get_result(
 
     match row {
         Some(r) => Ok(Json(json!({ "code": 0, "message": "ok", "data": r }))),
-        None => Ok(Json(
-            json!({ "code": 0, "message": "ok", "data": { "status": "not_found" } }),
-        )),
+        None => Ok(Json(json!({ "code": 0, "message": "ok", "data": { "status": "not_found" } }))),
     }
 }
 
@@ -128,9 +136,11 @@ fn default_page_size() -> u64 {
 
 pub async fn list_analyses(
     State(state): State<AppState>,
+    Extension(current_user): Extension<CurrentUser>,
     Query(q): Query<ListQuery>,
 ) -> AppResult<Json<Value>> {
     let db = get_db(&state)?;
+    check_project_access(db, &current_user, q.project_id).await?;
 
     let mut query =
         models::AiAnalysis::find().filter(models::ai_analysis::Column::ProjectId.eq(q.project_id));
@@ -142,10 +152,11 @@ pub async fn list_analyses(
         query = query.filter(models::ai_analysis::Column::AiSuggestion.is_not_null());
     }
 
+    let page_size = q.page_size.clamp(1, 100);
     let total = query.clone().count(db).await?;
     let items = query
         .order_by_desc(models::ai_analysis::Column::CreatedAt)
-        .paginate(db, q.page_size)
+        .paginate(db, page_size)
         .fetch_page(q.page.saturating_sub(1))
         .await?;
 
@@ -165,13 +176,16 @@ pub struct BatchBody {
 
 pub async fn trigger_batch(
     State(state): State<AppState>,
+    Extension(current_user): Extension<CurrentUser>,
     Json(body): Json<BatchBody>,
 ) -> AppResult<Json<Value>> {
     let db = get_db(&state)?;
+    check_project_access(db, &current_user, body.project_id).await?;
 
     let errors = models::JsError::find()
         .filter(models::js_error::Column::ProjectId.eq(body.project_id))
         .filter(models::js_error::Column::Fingerprint.eq(&body.fingerprint))
+        .limit(1000)
         .all(db)
         .await?;
 
@@ -192,4 +206,37 @@ pub async fn trigger_batch(
         "code": 0, "message": "ok",
         "data": { "queued": queued }
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_list_query_defaults() {
+        let q: ListQuery = serde_json::from_str(r#"{"project_id":1}"#).unwrap();
+        assert_eq!(q.project_id, 1);
+        assert_eq!(q.page, 1);
+        assert_eq!(q.page_size, 20);
+        assert!(q.model_used.is_none());
+        assert!(q.has_suggestion.is_none());
+    }
+
+    #[test]
+    fn test_list_query_with_filters() {
+        let q: ListQuery = serde_json::from_str(
+            r#"{"project_id":1,"model_used":"deepseek-chat","has_suggestion":true}"#,
+        )
+        .unwrap();
+        assert_eq!(q.model_used.as_deref(), Some("deepseek-chat"));
+        assert_eq!(q.has_suggestion, Some(true));
+    }
+
+    #[test]
+    fn test_batch_body_deserialize() {
+        let json_str = r#"{"fingerprint":"abc123","project_id":1}"#;
+        let body: BatchBody = serde_json::from_str(json_str).unwrap();
+        assert_eq!(body.fingerprint, "abc123");
+        assert_eq!(body.project_id, 1);
+    }
 }

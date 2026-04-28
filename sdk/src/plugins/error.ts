@@ -9,8 +9,8 @@
  * P0 错误（SyntaxError / ReferenceError）实时上报，其他批量上报。
  */
 
-import type { CollectPayload, ErrorData } from '../types';
-import { errorFingerprint, now } from '../core/utils';
+import type { CollectPayload, ErrorData, SanitizeConfig } from '../types';
+import { errorFingerprint, now, sanitizeUrl } from '../core/utils';
 
 const DEDUP_WINDOW_MS = 60_000;
 const DEDUP_MAX_COUNT = 10;
@@ -26,6 +26,7 @@ export interface ErrorPluginOptions {
   report: (payload: CollectPayload<ErrorData>) => void;
   onError?: (err: ErrorData) => void;
   debug?: boolean;
+  sanitize?: SanitizeConfig;
 }
 
 export function installErrorPlugin(options: ErrorPluginOptions): () => void {
@@ -36,6 +37,16 @@ export function installErrorPlugin(options: ErrorPluginOptions): () => void {
   }
 
   const dedup = new Map<string, DedupEntry>();
+
+  // 定期清理过期的去重条目，防止内存无限增长
+  const cleanupTimer = setInterval(() => {
+    const current = now();
+    dedup.forEach((entry, key) => {
+      if (current - entry.windowStart > DEDUP_WINDOW_MS) {
+        dedup.delete(key);
+      }
+    });
+  }, DEDUP_WINDOW_MS);
 
   const shouldReport = (fingerprint: string): boolean => {
     const current = now();
@@ -53,7 +64,7 @@ export function installErrorPlugin(options: ErrorPluginOptions): () => void {
     return entry.count <= DEDUP_MAX_COUNT;
   };
 
-  const emit = (data: ErrorData): void => {
+  const emit = (data: ErrorData, errorObj?: Error | null): void => {
     const fingerprint =
       data.fingerprint ||
       errorFingerprint({
@@ -65,7 +76,10 @@ export function installErrorPlugin(options: ErrorPluginOptions): () => void {
       });
     data.fingerprint = fingerprint;
     if (!shouldReport(fingerprint)) return;
-    const isP0 = P0_TYPES.some((t) => (data.message || '').indexOf(t) !== -1);
+    const isP0 =
+      P0_TYPES.includes(errorObj?.constructor?.name || '') ||
+      P0_TYPES.includes(errorObj?.name || '') ||
+      P0_TYPES.some((t) => (data.message || '').indexOf(t) !== -1);
     options.report({ type: 'error', data, priority: isP0 ? 'P0' : 'P1' });
     options.onError?.(data);
   };
@@ -74,14 +88,17 @@ export function installErrorPlugin(options: ErrorPluginOptions): () => void {
     // 资源加载错误走 capture 阶段的 errorCaptureHandler；这里只处理 JS 运行时
     if (!(event.error instanceof Error) && !event.message) return;
     const err = event.error as Error | null;
-    emit({
-      type: 'js',
-      message: event.message || (err && err.message) || 'Unknown error',
-      stack: err?.stack,
-      source_url: event.filename,
-      line: event.lineno,
-      column: event.colno,
-    });
+    emit(
+      {
+        type: 'js',
+        message: event.message || (err && err.message) || 'Unknown error',
+        stack: err?.stack,
+        source_url: sanitizeUrl(event.filename, options.sanitize?.sensitiveQueryKeys),
+        line: event.lineno,
+        column: event.colno,
+      },
+      err
+    );
   };
 
   const rejectionHandler = (event: PromiseRejectionEvent): void => {
@@ -100,7 +117,7 @@ export function installErrorPlugin(options: ErrorPluginOptions): () => void {
         /* ignore */
       }
     }
-    emit({ type: 'promise', message, stack });
+    emit({ type: 'promise', message, stack }, reason instanceof Error ? reason : null);
   };
 
   const errorCaptureHandler = (event: Event): void => {
@@ -115,8 +132,11 @@ export function installErrorPlugin(options: ErrorPluginOptions): () => void {
       '';
     emit({
       type: 'resource',
-      message: `Resource load failed: ${tagName} ${src}`,
-      source_url: src,
+      message: `Resource load failed: ${tagName} ${sanitizeUrl(
+        src,
+        options.sanitize?.sensitiveQueryKeys
+      )}`,
+      source_url: sanitizeUrl(src, options.sanitize?.sensitiveQueryKeys),
       extra: { tagName },
     });
   };
@@ -126,6 +146,8 @@ export function installErrorPlugin(options: ErrorPluginOptions): () => void {
   window.addEventListener('error', errorCaptureHandler, true);
 
   return () => {
+    clearInterval(cleanupTimer);
+    dedup.clear();
     window.removeEventListener('error', jsHandler);
     window.removeEventListener('unhandledrejection', rejectionHandler);
     window.removeEventListener('error', errorCaptureHandler, true);

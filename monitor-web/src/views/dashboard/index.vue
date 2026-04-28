@@ -3,11 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { useProjectStore } from '@/stores/project';
 import { getDashboardOverview, type OverviewData } from '@/api/dashboard';
 import * as echarts from 'echarts/core';
-import {
-  LineChart,
-  PieChart,
-  BarChart,
-} from 'echarts/charts';
+import { LineChart, PieChart, BarChart } from 'echarts/charts';
 import {
   TitleComponent,
   TooltipComponent,
@@ -17,8 +13,13 @@ import {
 import { CanvasRenderer } from 'echarts/renderers';
 
 echarts.use([
-  LineChart, PieChart, BarChart,
-  TitleComponent, TooltipComponent, GridComponent, LegendComponent,
+  LineChart,
+  PieChart,
+  BarChart,
+  TitleComponent,
+  TooltipComponent,
+  GridComponent,
+  LegendComponent,
   CanvasRenderer,
 ]);
 
@@ -42,7 +43,10 @@ async function fetchData() {
   if (!projectStore.currentId) return;
   loading.value = true;
   try {
-    const res = await getDashboardOverview({ project_id: projectStore.currentId, days: days.value });
+    const res = await getDashboardOverview({
+      project_id: projectStore.currentId,
+      days: days.value,
+    });
     data.value = res.data;
     await nextTick();
     renderCharts();
@@ -65,80 +69,92 @@ function renderTrend() {
   if (!trendRef.value || !data.value) return;
   if (!trendChart) trendChart = echarts.init(trendRef.value);
   const trend = data.value.error_trend;
-  trendChart.setOption({
-    tooltip: { trigger: 'axis' },
-    grid: { left: 40, right: 20, top: 20, bottom: 30 },
-    xAxis: { type: 'category', data: trend.map((t) => t.date), axisLabel: { fontSize: 11 } },
-    yAxis: { type: 'value', minInterval: 1 },
-    series: [
-      {
-        name: '错误数',
-        type: 'line',
-        data: trend.map((t) => t.count),
-        smooth: true,
-        areaStyle: { opacity: 0.15 },
-        itemStyle: { color: '#f56c6c' },
-      },
-    ],
-  });
+  trendChart.setOption(
+    {
+      tooltip: { trigger: 'axis' },
+      grid: { left: 40, right: 20, top: 20, bottom: 30 },
+      xAxis: { type: 'category', data: trend.map((t) => t.date), axisLabel: { fontSize: 11 } },
+      yAxis: { type: 'value', minInterval: 1 },
+      series: [
+        {
+          name: '错误数',
+          type: 'line',
+          data: trend.map((t) => t.count),
+          smooth: true,
+          areaStyle: { opacity: 0.15 },
+          itemStyle: { color: '#f56c6c' },
+        },
+      ],
+    },
+    true
+  );
 }
 
 function renderBrowser() {
   if (!browserRef.value || !data.value) return;
   if (!browserChart) browserChart = echarts.init(browserRef.value);
-  browserChart.setOption({
-    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-    legend: { orient: 'vertical', right: 10, top: 'center', textStyle: { fontSize: 11 } },
-    series: [
-      {
-        type: 'pie',
-        radius: ['40%', '70%'],
-        center: ['38%', '50%'],
-        data: data.value.browser_distribution,
-        label: { show: false },
-      },
-    ],
-  });
+  browserChart.setOption(
+    {
+      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+      legend: { orient: 'vertical', right: 10, top: 'center', textStyle: { fontSize: 11 } },
+      series: [
+        {
+          type: 'pie',
+          radius: ['40%', '70%'],
+          center: ['38%', '50%'],
+          data: data.value.browser_distribution,
+          label: { show: false },
+        },
+      ],
+    },
+    true
+  );
 }
 
 function renderOs() {
   if (!osRef.value || !data.value) return;
   if (!osChart) osChart = echarts.init(osRef.value);
-  osChart.setOption({
-    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-    legend: { orient: 'vertical', right: 10, top: 'center', textStyle: { fontSize: 11 } },
-    series: [
-      {
-        type: 'pie',
-        radius: ['40%', '70%'],
-        center: ['38%', '50%'],
-        data: data.value.os_distribution,
-        label: { show: false },
-      },
-    ],
-  });
+  osChart.setOption(
+    {
+      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+      legend: { orient: 'vertical', right: 10, top: 'center', textStyle: { fontSize: 11 } },
+      series: [
+        {
+          type: 'pie',
+          radius: ['40%', '70%'],
+          center: ['38%', '50%'],
+          data: data.value.os_distribution,
+          label: { show: false },
+        },
+      ],
+    },
+    true
+  );
 }
 
 function renderDevice() {
   if (!deviceRef.value || !data.value) return;
   if (!deviceChart) deviceChart = echarts.init(deviceRef.value);
-  deviceChart.setOption({
-    tooltip: { trigger: 'axis' },
-    grid: { left: 60, right: 20, top: 20, bottom: 30 },
-    xAxis: {
-      type: 'category',
-      data: data.value.device_distribution.map((d) => d.name),
-    },
-    yAxis: { type: 'value', minInterval: 1 },
-    series: [
-      {
-        type: 'bar',
-        data: data.value.device_distribution.map((d) => d.value),
-        itemStyle: { color: '#409eff' },
-        barMaxWidth: 60,
+  deviceChart.setOption(
+    {
+      tooltip: { trigger: 'axis' },
+      grid: { left: 60, right: 20, top: 20, bottom: 30 },
+      xAxis: {
+        type: 'category',
+        data: data.value.device_distribution.map((d) => d.name),
       },
-    ],
-  });
+      yAxis: { type: 'value', minInterval: 1 },
+      series: [
+        {
+          type: 'bar',
+          data: data.value.device_distribution.map((d) => d.value),
+          itemStyle: { color: '#409eff' },
+          barMaxWidth: 60,
+        },
+      ],
+    },
+    true
+  );
 }
 
 function disposeCharts() {
@@ -166,6 +182,13 @@ watch(days, fetchData);
 const perf = computed(() => data.value?.avg_performance);
 const fmt = (v: number | null | undefined, unit = 'ms') =>
   v == null ? '-' : `${Math.round(v)} ${unit}`;
+
+const perfItems = [
+  { key: 'fp', label: 'FP（首次绘制）' },
+  { key: 'fcp', label: 'FCP（首次内容绘制）' },
+  { key: 'lcp', label: 'LCP（最大内容绘制）' },
+  { key: 'ttfb', label: 'TTFB（首字节时间）' },
+];
 </script>
 
 <template>
@@ -254,7 +277,9 @@ const fmt = (v: number | null | undefined, unit = 'ms') =>
 
     <!-- 性能指标卡片 -->
     <el-card shadow="never" class="dashboard__chart-card">
-      <template #header><span>性能指标（近 {{ days }} 天平均）</span></template>
+      <template #header
+        ><span>性能指标（近 {{ days }} 天平均）</span></template
+      >
       <el-row :gutter="16">
         <el-col v-for="item in perfItems" :key="item.key" :span="6">
           <div class="perf-item">
@@ -266,15 +291,6 @@ const fmt = (v: number | null | undefined, unit = 'ms') =>
     </el-card>
   </div>
 </template>
-
-<script lang="ts">
-const perfItems = [
-  { key: 'fp', label: 'FP（首次绘制）' },
-  { key: 'fcp', label: 'FCP（首次内容绘制）' },
-  { key: 'lcp', label: 'LCP（最大内容绘制）' },
-  { key: 'ttfb', label: 'TTFB（首字节时间）' },
-];
-</script>
 
 <style scoped lang="scss">
 .dashboard {
@@ -322,10 +338,18 @@ const perfItems = [
     margin-top: 4px;
   }
 
-  &--error .stat-card__value { color: #f56c6c; }
-  &--network .stat-card__value { color: #e6a23c; }
-  &--perf .stat-card__value { color: #409eff; }
-  &--lcp .stat-card__value { color: #67c23a; }
+  &--error .stat-card__value {
+    color: #f56c6c;
+  }
+  &--network .stat-card__value {
+    color: #e6a23c;
+  }
+  &--perf .stat-card__value {
+    color: #409eff;
+  }
+  &--lcp .stat-card__value {
+    color: #67c23a;
+  }
 }
 
 .chart {

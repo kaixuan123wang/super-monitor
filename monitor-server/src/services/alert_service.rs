@@ -8,6 +8,8 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::net::IpAddr;
+use tokio::net::lookup_host;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
@@ -112,7 +114,7 @@ async fn check_rule(
             if total > 0 {
                 let failed = rows
                     .iter()
-                    .filter(|r| r.status.map_or(true, |s| s >= 400) || r.error_type.is_some())
+                    .filter(|r| r.status.is_none_or(|s| s >= 400) || r.error_type.is_some())
                     .count() as i32;
                 let rate = ((failed as f64 / total as f64) * 100.0).round() as i32;
                 if rate >= threshold {
@@ -267,6 +269,7 @@ async fn check_rule(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn fire_alert(
     db: &DatabaseConnection,
     tx: &broadcast::Sender<AlertEvent>,
@@ -378,8 +381,11 @@ async fn fire_alert(
 }
 
 async fn send_webhook(url: &str, event: &AlertEvent) -> Result<(), String> {
+    let url = validate_webhook_url(url)?;
+    ensure_public_webhook_target(&url).await?;
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| e.to_string())?;
     let resp = client
@@ -392,6 +398,74 @@ async fn send_webhook(url: &str, event: &AlertEvent) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("HTTP {}", resp.status()))
+    }
+}
+
+pub fn validate_webhook_url(url: &str) -> Result<reqwest::Url, String> {
+    let parsed = reqwest::Url::parse(url).map_err(|_| "invalid webhook URL".to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err("webhook URL must use http or https".into());
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("webhook URL must not include credentials".into());
+    }
+
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "webhook URL must include a host".to_string())?
+        .trim_end_matches('.')
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_ascii_lowercase();
+    if host == "localhost" || host.ends_with(".localhost") {
+        return Err("webhook URL must not target localhost".into());
+    }
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_blocked_webhook_ip(ip) {
+            return Err("webhook URL must not target private or local networks".into());
+        }
+    }
+
+    Ok(parsed)
+}
+
+async fn ensure_public_webhook_target(url: &reqwest::Url) -> Result<(), String> {
+    let host = url
+        .host_str()
+        .ok_or_else(|| "webhook URL must include a host".to_string())?;
+    let port = url
+        .port_or_known_default()
+        .ok_or_else(|| "webhook URL must include a valid port".to_string())?;
+    let addrs = lookup_host((host, port))
+        .await
+        .map_err(|_| "webhook host could not be resolved".to_string())?;
+
+    for addr in addrs {
+        if is_blocked_webhook_ip(addr.ip()) {
+            return Err("webhook URL must not resolve to private or local networks".into());
+        }
+    }
+    Ok(())
+}
+
+fn is_blocked_webhook_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            ip.is_private()
+                || ip.is_loopback()
+                || ip.is_link_local()
+                || ip.is_broadcast()
+                || ip.is_documentation()
+                || ip.is_unspecified()
+                || ip.octets()[0] >= 224
+        }
+        IpAddr::V6(ip) => {
+            ip.is_loopback()
+                || ip.is_unspecified()
+                || ip.is_unique_local()
+                || ip.is_unicast_link_local()
+                || ip.is_multicast()
+        }
     }
 }
 
@@ -432,5 +506,94 @@ pub async fn check_on_new_error(
         if let Err(e) = check_rule(db, rule, tx).await {
             warn!(rule_id = rule.id, error = %e, "instant rule check error");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_truncate_chars_short_string() {
+        assert_eq!(truncate_chars("hello", 10), "hello");
+    }
+
+    #[test]
+    fn test_truncate_chars_exact_length() {
+        assert_eq!(truncate_chars("hello", 5), "hello");
+    }
+
+    #[test]
+    fn test_truncate_chars_long_string() {
+        assert_eq!(truncate_chars("hello world", 5), "hello…");
+    }
+
+    #[test]
+    fn test_truncate_chars_empty() {
+        assert_eq!(truncate_chars("", 10), "");
+    }
+
+    #[test]
+    fn test_truncate_chars_unicode() {
+        let result = truncate_chars("你好世界测试", 3);
+        assert_eq!(result, "你好世…");
+    }
+
+    #[test]
+    fn test_truncate_chars_zero_max() {
+        assert_eq!(truncate_chars("hello", 0), "…");
+    }
+
+    #[test]
+    fn test_alert_event_serialization() {
+        let event = AlertEvent {
+            rule_id: 1,
+            rule_name: "test rule".into(),
+            project_id: 1,
+            alert_type: "error_spike".into(),
+            severity: "warning".into(),
+            content: "too many errors".into(),
+            error_count: Some(10),
+            sample_errors: Some(json!([{"id": 1}])),
+            timestamp: now_fixed(),
+        };
+        let json_str = serde_json::to_string(&event).unwrap();
+        assert!(json_str.contains("error_spike"));
+        assert!(json_str.contains("too many errors"));
+    }
+
+    #[test]
+    fn test_alert_event_deserialization() {
+        let json_str = r#"{
+            "rule_id": 1,
+            "rule_name": "test",
+            "project_id": 1,
+            "alert_type": "error_spike",
+            "severity": "warning",
+            "content": "test content",
+            "error_count": null,
+            "sample_errors": null,
+            "timestamp": "2024-01-15T10:00:00+00:00"
+        }"#;
+        let event: AlertEvent = serde_json::from_str(json_str).unwrap();
+        assert_eq!(event.rule_id, 1);
+        assert_eq!(event.alert_type, "error_spike");
+    }
+
+    #[test]
+    fn test_validate_webhook_url_rejects_localhost() {
+        assert!(validate_webhook_url("http://localhost/hook").is_err());
+        assert!(validate_webhook_url("http://127.0.0.1/hook").is_err());
+        assert!(validate_webhook_url("http://[::1]/hook").is_err());
+    }
+
+    #[test]
+    fn test_validate_webhook_url_rejects_credentials() {
+        assert!(validate_webhook_url("https://user:pass@example.com/hook").is_err());
+    }
+
+    #[test]
+    fn test_is_blocked_webhook_ip_blocks_metadata_service() {
+        assert!(is_blocked_webhook_ip("169.254.169.254".parse().unwrap()));
     }
 }

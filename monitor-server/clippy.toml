@@ -1,0 +1,19 @@
+# Clippy 配置文件
+
+# 最大行宽
+max-suggested-slice-pattern-length = 3
+
+# 允许的未使用前缀
+allowed-idents-below-min-chars = ["_"]
+
+# 认知复杂度阈值
+cognitive-complexity-threshold = 25
+
+# 类型复杂度阈值
+type-complexity-threshold = 250
+
+# 函数参数太多
+too-many-arguments-threshold = 7
+
+# 单行最大字符数
+single-char-binding-names-threshold = 4

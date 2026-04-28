@@ -5,19 +5,25 @@
  */
 
 import { BreadcrumbBuffer } from '../core/breadcrumb-buffer';
+import { sanitizeBodyString, sanitizeObject } from '../core/utils';
+import type { SanitizeConfig } from '../types';
 
 export interface ConsolePluginOptions {
   buffer: BreadcrumbBuffer;
   levels?: Array<'log' | 'info' | 'warn' | 'error' | 'debug'>;
+  sanitize?: SanitizeConfig;
 }
 
-function safeStringify(args: unknown[]): string {
+function safeStringify(args: unknown[], sanitize?: SanitizeConfig): string {
+  const maxSize = sanitize?.maxBodySize ?? 10 * 1024;
   try {
     return args
       .map((a) => {
-        if (typeof a === 'string') return a;
+        if (typeof a === 'string') {
+          return sanitizeBodyString(a, sanitize?.sensitiveFields, maxSize);
+        }
         if (a instanceof Error) return a.message;
-        return JSON.stringify(a);
+        return JSON.stringify(sanitizeObject(a, sanitize?.sensitiveFields));
       })
       .join(' ')
       .slice(0, 300);
@@ -44,8 +50,11 @@ export function installConsolePlugin(options: ConsolePluginOptions): () => void 
     ): void => {
       options.buffer.push({
         category: 'console',
-        level: level === 'log' || level === 'info' ? 'info' : (level as 'warn' | 'error' | 'debug'),
-        message: safeStringify(args),
+        level:
+          level === 'log' || level === 'info'
+            ? 'info'
+            : (level as 'warn' | 'error' | 'debug'),
+        message: safeStringify(args, options.sanitize),
       });
       try {
         orig.apply(console, args);

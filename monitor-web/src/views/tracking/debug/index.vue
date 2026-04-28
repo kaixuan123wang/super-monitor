@@ -30,20 +30,36 @@ function connectSSE() {
   sseClient?.disconnect();
   const url = `/api/tracking/live-events?project_id=${projectStore.currentId}${filterUser.value ? '&distinct_id=' + encodeURIComponent(filterUser.value) : ''}`;
   sseClient = new SSEClient(url)
-    .on('init', () => { sseConnected.value = true; })
+    .on('init', () => {
+      sseConnected.value = true;
+    })
     .on('track', (data: unknown) => {
-      const d = data as { id: number; event: string; distinct_id: string; properties: unknown; page_url: string | null; created_at: string };
+      const d = data as {
+        id: number;
+        event: string;
+        distinct_id: string;
+        properties: unknown;
+        page_url: string | null;
+        created_at: string;
+      };
       if (filterEvent.value && d.event !== filterEvent.value) return;
       events.value.unshift({ ...d, type: 'track' });
       if (events.value.length > 200) events.value.pop();
     })
     .on('profile', (data: unknown) => {
-      const d = data as { id: number; distinct_id: string; properties: unknown; updated_at: string };
+      const d = data as {
+        id: number;
+        distinct_id: string;
+        properties: unknown;
+        updated_at: string;
+      };
       if (filterEvent.value && filterEvent.value !== 'profile') return;
       events.value.unshift({ ...d, type: 'profile', event: 'profile' });
       if (events.value.length > 200) events.value.pop();
     })
-    .on('heartbeat', () => { sseConnected.value = true; });
+    .on('heartbeat', () => {
+      sseConnected.value = true;
+    });
 
   sseClient.connect();
 }
@@ -83,27 +99,52 @@ onUnmounted(() => {
   disconnect();
 });
 
-watch(() => projectStore.currentId, (id) => {
-  events.value = [];
-  if (id && !isPaused.value) connectSSE();
-  else disconnect();
-});
+watch(
+  () => projectStore.currentId,
+  (id) => {
+    events.value = [];
+    if (id && !isPaused.value) connectSSE();
+    else disconnect();
+  }
+);
 </script>
 
 <template>
   <div>
     <el-card shadow="never">
       <template #header>
-        <div style="display:flex;justify-content:space-between;align-items:center">
+        <div style="display: flex; justify-content: space-between; align-items: center">
           <span>
             实时事件流
-            <el-tag :type="sseConnected ? 'success' : 'danger'" size="small" style="margin-left:8px">
+            <el-tag
+              :type="sseConnected ? 'success' : 'danger'"
+              size="small"
+              style="margin-left: 8px"
+            >
               {{ sseConnected ? '已连接' : '已断开' }}
             </el-tag>
           </span>
-          <div style="display:flex;gap:8px;align-items:center">
-            <el-input v-model="filterEvent" placeholder="事件名过滤" clearable style="width:140px" @change="connectSSE" />
-            <el-input v-model="filterUser" placeholder="用户 ID 过滤" clearable style="width:160px" @change="connectSSE" />
+          <div style="display: flex; gap: 8px; align-items: center">
+            <el-input
+              v-model="filterEvent"
+              placeholder="事件名过滤"
+              clearable
+              style="width: 140px"
+              @change="
+                clearEvents();
+                connectSSE();
+              "
+            />
+            <el-input
+              v-model="filterUser"
+              placeholder="用户 ID 过滤"
+              clearable
+              style="width: 160px"
+              @change="
+                clearEvents();
+                connectSSE();
+              "
+            />
             <el-button :type="isPaused ? 'warning' : 'primary'" @click="togglePause">
               {{ isPaused ? '继续' : '暂停' }}
             </el-button>
@@ -116,7 +157,9 @@ watch(() => projectStore.currentId, (id) => {
       <el-scrollbar v-else max-height="600px" always>
         <div v-for="e in events" :key="`${e.type}-${e.id}`" class="event-item">
           <div class="event-header">
-            <el-tag size="small" :type="e.type === 'profile' ? 'success' : 'primary'">{{ e.event }}</el-tag>
+            <el-tag size="small" :type="e.type === 'profile' ? 'success' : 'primary'">{{
+              e.event
+            }}</el-tag>
             <span class="event-id">#{{ e.id }}</span>
             <span class="event-user">{{ e.distinct_id }}</span>
             <span class="event-url">{{ e.page_url || '-' }}</span>
@@ -135,17 +178,34 @@ watch(() => projectStore.currentId, (id) => {
   border-bottom: 1px solid #ebeef5;
   font-size: 13px;
 }
-.event-item:hover { background: #f5f7fa; }
+.event-item:hover {
+  background: #f5f7fa;
+}
 .event-header {
   display: flex;
   align-items: center;
   gap: 10px;
   margin-bottom: 6px;
 }
-.event-id { color: #999; font-size: 12px; }
-.event-user { color: #409eff; font-weight: 500; }
-.event-url { color: #67c23a; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.event-time { color: #999; font-size: 12px; }
+.event-id {
+  color: #999;
+  font-size: 12px;
+}
+.event-user {
+  color: #409eff;
+  font-weight: 500;
+}
+.event-url {
+  color: #67c23a;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.event-time {
+  color: #999;
+  font-size: 12px;
+}
 .event-json {
   margin: 0;
   padding: 8px 12px;

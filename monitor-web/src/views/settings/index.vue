@@ -2,10 +2,17 @@
 import { ref, onMounted, watch, reactive } from 'vue';
 import { useProjectStore } from '@/stores/project';
 import {
-  listRules, createRule, updateRule, deleteRule,
-  listLogs, type AlertRule, type AlertLog, type CreateRuleBody,
+  listRules,
+  createRule,
+  updateRule,
+  deleteRule,
+  listLogs,
+  type AlertRule,
+  type AlertLog,
+  type CreateRuleBody,
 } from '@/api/alert';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { Check } from '@element-plus/icons-vue';
 
 const projectStore = useProjectStore();
 
@@ -34,7 +41,11 @@ async function fetchLogs() {
   if (!projectStore.currentId) return;
   logsLoading.value = true;
   try {
-    const res = await listLogs({ project_id: projectStore.currentId, page: logsPage.value, page_size: 20 });
+    const res = await listLogs({
+      project_id: projectStore.currentId,
+      page: logsPage.value,
+      page_size: 20,
+    });
     logs.value = res.data?.list ?? [];
     logsTotal.value = res.data?.total ?? 0;
   } finally {
@@ -94,7 +105,10 @@ function openEdit(rule: AlertRule) {
 }
 
 async function saveRule() {
-  if (!form.name) { ElMessage.warning('请填写规则名称'); return; }
+  if (!form.name) {
+    ElMessage.warning('请填写规则名称');
+    return;
+  }
   saving.value = true;
   try {
     if (editingId.value) {
@@ -112,16 +126,24 @@ async function saveRule() {
 }
 
 async function handleDelete(rule: AlertRule) {
-  await ElMessageBox.confirm(`确认删除规则「${rule.name}」？`, '确认', { type: 'warning' });
-  await deleteRule(rule.id);
-  ElMessage.success('已删除');
-  fetchRules();
+  try {
+    await ElMessageBox.confirm(`确认删除规则「${rule.name}」？`, '确认', { type: 'warning' });
+    await deleteRule(rule.id);
+    ElMessage.success('已删除');
+    fetchRules();
+  } catch {
+    // 用户取消或请求失败
+  }
 }
 
 async function toggleEnabled(rule: AlertRule) {
-  await updateRule(rule.id, { is_enabled: !rule.is_enabled });
-  ElMessage.success(rule.is_enabled ? '已禁用' : '已启用');
-  fetchRules();
+  try {
+    await updateRule(rule.id, { is_enabled: !rule.is_enabled });
+    ElMessage.success(rule.is_enabled ? '已禁用' : '已启用');
+    fetchRules();
+  } catch {
+    // 请求失败
+  }
 }
 
 function severityTag(s: string): 'danger' | 'warning' | 'info' | 'success' {
@@ -139,8 +161,16 @@ onMounted(async () => {
   fetchLogs();
 });
 
-watch(() => projectStore.currentId, () => { fetchRules(); fetchLogs(); });
-watch(activeTab, (v) => { if (v === 'logs') fetchLogs(); });
+watch(
+  () => projectStore.currentId,
+  () => {
+    fetchRules();
+    fetchLogs();
+  }
+);
+watch(activeTab, (v) => {
+  if (v === 'logs') fetchLogs();
+});
 </script>
 
 <template>
@@ -148,7 +178,7 @@ watch(activeTab, (v) => { if (v === 'logs') fetchLogs(); });
     <el-tabs v-model="activeTab">
       <!-- 告警规则 -->
       <el-tab-pane label="告警规则" name="rules">
-        <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+        <div style="display: flex; justify-content: flex-end; margin-bottom: 12px">
           <el-button type="primary" @click="openCreate">新建规则</el-button>
         </div>
 
@@ -180,7 +210,9 @@ watch(activeTab, (v) => { if (v === 'logs') fetchLogs(); });
           </el-table-column>
           <el-table-column label="操作" width="170" fixed="right">
             <template #default="{ row }">
-              <el-button link @click="toggleEnabled(row)">{{ row.is_enabled ? '禁用' : '启用' }}</el-button>
+              <el-button link @click="toggleEnabled(row)">{{
+                row.is_enabled ? '禁用' : '启用'
+              }}</el-button>
               <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
               <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
             </template>
@@ -202,14 +234,18 @@ watch(activeTab, (v) => { if (v === 'logs') fetchLogs(); });
           <el-table-column prop="error_count" label="错误数" width="80" />
           <el-table-column label="状态" width="80">
             <template #default="{ row }">
-              <el-tag :type="row.status === 'sent' ? 'success' : 'danger'" size="small">{{ row.status }}</el-tag>
+              <el-tag :type="row.status === 'sent' ? 'success' : 'danger'" size="small">{{
+                row.status
+              }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column label="时间" width="170">
-            <template #default="{ row }">{{ row.created_at?.slice(0, 19).replace('T', ' ') }}</template>
+            <template #default="{ row }">{{
+              row.created_at?.slice(0, 19).replace('T', ' ')
+            }}</template>
           </el-table-column>
         </el-table>
-        <div style="margin-top:12px;text-align:right">
+        <div style="margin-top: 12px; text-align: right">
           <el-pagination
             v-model:current-page="logsPage"
             :page-size="20"
@@ -222,14 +258,23 @@ watch(activeTab, (v) => { if (v === 'logs') fetchLogs(); });
     </el-tabs>
 
     <!-- 创建/编辑规则 dialog -->
-    <el-dialog v-model="dialogVisible" :title="editingId ? '编辑告警规则' : '新建告警规则'" width="500px">
+    <el-dialog
+      v-model="dialogVisible"
+      :title="editingId ? '编辑告警规则' : '新建告警规则'"
+      width="500px"
+    >
       <el-form :model="form" label-width="110px">
         <el-form-item label="规则名称" required>
           <el-input v-model="form.name" placeholder="例如：生产环境错误激增" />
         </el-form-item>
         <el-form-item label="规则类型" required>
-          <el-select v-model="form.rule_type" style="width:100%">
-            <el-option v-for="o in RULE_TYPE_OPTIONS" :key="o.value" :label="o.label" :value="o.value" />
+          <el-select v-model="form.rule_type" style="width: 100%">
+            <el-option
+              v-for="o in RULE_TYPE_OPTIONS"
+              :key="o.value"
+              :label="o.label"
+              :value="o.value"
+            />
           </el-select>
         </el-form-item>
         <el-form-item
@@ -237,7 +282,7 @@ watch(activeTab, (v) => { if (v === 'logs') fetchLogs(); });
           label="阈值"
         >
           <el-input-number v-model="form.threshold" :min="1" />
-          <span style="margin-left:8px;color:#999">
+          <span style="margin-left: 8px; color: #999">
             {{ form.rule_type === 'failure_rate' ? '%' : '次' }}
           </span>
         </el-form-item>

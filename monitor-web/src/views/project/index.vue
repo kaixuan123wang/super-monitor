@@ -112,8 +112,10 @@ function showSnippet(row: Project) {
 
 function buildSnippet(p: Project): string {
   const origin = window.location.origin;
-  return `<!-- 监控 SDK 接入示例 -->
-<script src="${origin}/sdk.iife.js"></` + `script>
+  return (
+    `<!-- 监控 SDK 接入示例 -->
+<script src="${origin}/sdk.iife.js"></` +
+    `script>
 <script>
   Monitor.init({
     appId: '${p.app_id}',
@@ -122,14 +124,42 @@ function buildSnippet(p: Project): string {
     environment: '${p.environment}',
     debug: false,
   });
-</` + `script>`;
+</` +
+    `script>`
+  );
 }
 
 function copySnippet() {
   if (!snippetProject.value) return;
   const text = buildSnippet(snippetProject.value);
-  navigator.clipboard?.writeText(text);
-  ElMessage.success('接入代码已复制到剪贴板');
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        ElMessage.success('接入代码已复制到剪贴板');
+      })
+      .catch(() => {
+        fallbackCopy(text);
+      });
+  } else {
+    fallbackCopy(text);
+  }
+}
+
+function fallbackCopy(text: string) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand('copy');
+    ElMessage.success('接入代码已复制到剪贴板');
+  } catch {
+    ElMessage.error('复制失败，请手动复制');
+  }
+  document.body.removeChild(ta);
 }
 
 // ============ 切换当前项目 ============
@@ -175,7 +205,9 @@ onMounted(reload);
       <el-table-column prop="name" label="名称" min-width="160">
         <template #default="{ row }">
           <div class="project-list__name">
-            <el-tag v-if="row.id === projectStore.currentId" type="success" size="small">当前</el-tag>
+            <el-tag v-if="row.id === projectStore.currentId" type="success" size="small"
+              >当前</el-tag
+            >
             {{ row.name }}
           </div>
         </template>
@@ -211,11 +243,7 @@ onMounted(reload);
   </el-card>
 
   <!-- 新建 / 编辑 对话框 -->
-  <el-dialog
-    v-model="dialogVisible"
-    :title="editing ? '编辑项目' : '新建项目'"
-    width="500"
-  >
+  <el-dialog v-model="dialogVisible" :title="editing ? '编辑项目' : '新建项目'" width="500">
     <el-form :model="form" label-width="100px">
       <el-form-item label="项目名称" required>
         <el-input v-model="form.name" placeholder="例如：官网" />
@@ -251,15 +279,14 @@ onMounted(reload);
         将下面的代码片段加入到目标网站的
         <code>&lt;head&gt;</code> 中即可开始采集。
       </p>
-      <el-input
-        type="textarea"
-        :model-value="buildSnippet(snippetProject)"
-        :rows="10"
-        readonly
-      />
+      <el-input type="textarea" :model-value="buildSnippet(snippetProject)" :rows="10" readonly />
       <div class="project-list__snippet-meta">
-        <div><strong>App ID：</strong><code>{{ snippetProject.app_id }}</code></div>
-        <div><strong>App Key：</strong><code>{{ snippetProject.app_key }}</code></div>
+        <div>
+          <strong>App ID：</strong><code>{{ snippetProject.app_id }}</code>
+        </div>
+        <div>
+          <strong>App Key：</strong><code>{{ snippetProject.app_key }}</code>
+        </div>
       </div>
     </template>
     <template #footer>

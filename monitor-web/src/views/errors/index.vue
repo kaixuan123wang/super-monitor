@@ -3,6 +3,7 @@ import { onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useProjectStore } from '@/stores/project';
 import { listErrors, type JsErrorRow, type ListErrorsParams } from '@/api/error';
+import { truncate } from '@/utils/common';
 import ErrorDetail from './ErrorDetail.vue';
 
 const projectStore = useProjectStore();
@@ -87,11 +88,6 @@ function errorTypeTag(t: string): 'danger' | 'warning' | 'info' {
   if (t === 'promise') return 'warning';
   return 'info';
 }
-
-function truncate(s: string | null | undefined, n = 80): string {
-  if (!s) return '';
-  return s.length > n ? s.slice(0, n) + '…' : s;
-}
 </script>
 
 <template>
@@ -110,20 +106,12 @@ function truncate(s: string | null | undefined, n = 80): string {
           style="width: 220px"
           @change="(v: number) => projectStore.setCurrent(v)"
         >
-          <el-option
-            v-for="p in projectStore.list"
-            :key="p.id"
-            :label="p.name"
-            :value="p.id"
-          />
+          <el-option v-for="p in projectStore.list" :key="p.id" :label="p.name" :value="p.id" />
         </el-select>
       </div>
     </template>
 
-    <el-empty
-      v-if="!projectStore.currentId"
-      description="请先创建并选择一个项目"
-    />
+    <el-empty v-if="!projectStore.currentId" description="请先创建并选择一个项目" />
 
     <template v-else>
       <!-- 筛选栏 -->
@@ -136,7 +124,12 @@ function truncate(s: string | null | undefined, n = 80): string {
           </el-select>
         </el-form-item>
         <el-form-item label="浏览器">
-          <el-input v-model="filter.browser" clearable placeholder="例如 Chrome" style="width: 160px" />
+          <el-input
+            v-model="filter.browser"
+            clearable
+            placeholder="例如 Chrome"
+            style="width: 160px"
+          />
         </el-form-item>
         <el-form-item label="关键字">
           <el-input

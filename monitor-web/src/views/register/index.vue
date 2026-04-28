@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus';
 import { User, Message, Lock, OfficeBuilding } from '@element-plus/icons-vue';
 import { register } from '@/api/auth';
 import { useUserStore } from '@/stores/user';
+import AuthLayout from '@/views/auth/AuthLayout.vue';
 
 const router = useRouter();
 const userStore = useUserStore();
@@ -21,8 +22,8 @@ const form = reactive({
 const validatePass = (_rule: unknown, value: string, callback: (error?: Error) => void) => {
   if (value === '') {
     callback(new Error('请输入密码'));
-  } else if (value.length < 6) {
-    callback(new Error('密码长度不能少于6位'));
+  } else if (value.length < 12) {
+    callback(new Error('密码长度不能少于12位'));
   } else {
     callback();
   }
@@ -64,9 +65,7 @@ async function handleRegister() {
     });
     const data = res.data;
     if (data) {
-      localStorage.setItem('__monitor_access_token', data.access_token);
-      localStorage.setItem('__monitor_refresh_token', data.refresh_token);
-      userStore.setToken(data.access_token);
+      userStore.setToken(data.access_token, data.refresh_token);
       userStore.setUser({
         id: data.user.id,
         username: data.user.username,
@@ -86,145 +85,62 @@ async function handleRegister() {
 </script>
 
 <template>
-  <div class="register-page">
-    <div class="register-box">
-      <div class="register-header">
-        <h1 class="register-title">JS Monitor</h1>
-        <p class="register-subtitle">注册管理员账号</p>
-      </div>
+  <AuthLayout subtitle="注册管理员账号" :box-width="420">
+    <el-form ref="formRef" :model="form" :rules="rules" size="large" @keyup.enter="handleRegister">
+      <el-form-item prop="username">
+        <el-input v-model="form.username" placeholder="用户名" :prefix-icon="User" clearable />
+      </el-form-item>
 
-      <el-form
-        ref="formRef"
-        :model="form"
-        :rules="rules"
-        size="large"
-        @keyup.enter="handleRegister"
-      >
-        <el-form-item prop="username">
-          <el-input
-            v-model="form.username"
-            placeholder="用户名"
-            :prefix-icon="User"
-            clearable
-          />
-        </el-form-item>
+      <el-form-item prop="email">
+        <el-input v-model="form.email" placeholder="邮箱" :prefix-icon="Message" clearable />
+      </el-form-item>
 
-        <el-form-item prop="email">
-          <el-input
-            v-model="form.email"
-            placeholder="邮箱"
-            :prefix-icon="Message"
-            clearable
-          />
-        </el-form-item>
+      <el-form-item prop="password">
+        <el-input
+          v-model="form.password"
+          type="password"
+          placeholder="密码（至少12位）"
+          :prefix-icon="Lock"
+          show-password
+          clearable
+        />
+      </el-form-item>
 
-        <el-form-item prop="password">
-          <el-input
-            v-model="form.password"
-            type="password"
-            placeholder="密码（至少6位）"
-            :prefix-icon="Lock"
-            show-password
-            clearable
-          />
-        </el-form-item>
+      <el-form-item prop="confirmPassword">
+        <el-input
+          v-model="form.confirmPassword"
+          type="password"
+          placeholder="确认密码"
+          :prefix-icon="Lock"
+          show-password
+          clearable
+        />
+      </el-form-item>
 
-        <el-form-item prop="confirmPassword">
-          <el-input
-            v-model="form.confirmPassword"
-            type="password"
-            placeholder="确认密码"
-            :prefix-icon="Lock"
-            show-password
-            clearable
-          />
-        </el-form-item>
+      <el-form-item prop="groupName">
+        <el-input
+          v-model="form.groupName"
+          placeholder="分组名称（可选，默认 Default）"
+          :prefix-icon="OfficeBuilding"
+          clearable
+        />
+      </el-form-item>
 
-        <el-form-item prop="groupName">
-          <el-input
-            v-model="form.groupName"
-            placeholder="分组名称（可选，默认 Default）"
-            :prefix-icon="OfficeBuilding"
-            clearable
-          />
-        </el-form-item>
+      <el-form-item>
+        <el-button
+          type="primary"
+          style="width: 100%; height: 44px; font-size: 16px; border-radius: 6px"
+          :loading="loading"
+          @click="handleRegister"
+        >
+          注 册
+        </el-button>
+      </el-form-item>
+    </el-form>
 
-        <el-form-item>
-          <el-button
-            type="primary"
-            class="register-btn"
-            :loading="loading"
-            @click="handleRegister"
-          >
-            注 册
-          </el-button>
-        </el-form-item>
-      </el-form>
-
-      <div class="register-footer">
-        <span>已有账号？</span>
-        <router-link to="/login">立即登录</router-link>
-      </div>
-    </div>
-  </div>
+    <template #footer>
+      <span>已有账号？</span>
+      <router-link to="/login">立即登录</router-link>
+    </template>
+  </AuthLayout>
 </template>
-
-<style scoped lang="scss">
-.register-page {
-  height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, #1a2a3a 0%, #0d1b2a 100%);
-}
-
-.register-box {
-  width: 420px;
-  padding: 40px;
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
-}
-
-.register-header {
-  text-align: center;
-  margin-bottom: 32px;
-}
-
-.register-title {
-  font-size: 28px;
-  font-weight: 700;
-  color: #001529;
-  margin: 0 0 8px;
-  letter-spacing: 1px;
-}
-
-.register-subtitle {
-  font-size: 14px;
-  color: #8c8c8c;
-  margin: 0;
-}
-
-.register-btn {
-  width: 100%;
-  height: 44px;
-  font-size: 16px;
-  border-radius: 6px;
-}
-
-.register-footer {
-  text-align: center;
-  margin-top: 16px;
-  font-size: 14px;
-  color: #8c8c8c;
-
-  a {
-    color: var(--el-color-primary);
-    margin-left: 4px;
-
-    &:hover {
-      text-decoration: underline;
-    }
-  }
-}
-</style>

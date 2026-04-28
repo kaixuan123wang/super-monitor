@@ -280,3 +280,103 @@ async fn upsert_profile_touch(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_merge_profile_set() {
+        let existing = json!({"name": "Alice", "age": 25});
+        let incoming = json!({"age": 30, "city": "Beijing"});
+        let result = merge_profile(&existing, &incoming, "set");
+        assert_eq!(result["name"], "Alice");
+        assert_eq!(result["age"], 30);
+        assert_eq!(result["city"], "Beijing");
+    }
+
+    #[test]
+    fn test_merge_profile_set_once() {
+        let existing = json!({"name": "Alice", "age": 25});
+        let incoming = json!({"age": 30, "city": "Beijing"});
+        let result = merge_profile(&existing, &incoming, "set_once");
+        assert_eq!(result["name"], "Alice");
+        assert_eq!(result["age"], 25);
+        assert_eq!(result["city"], "Beijing");
+    }
+
+    #[test]
+    fn test_merge_profile_unset() {
+        let existing = json!({"name": "Alice", "age": 25});
+        let incoming = json!({"age": null});
+        let result = merge_profile(&existing, &incoming, "unset");
+        assert_eq!(result["name"], "Alice");
+        assert!(result.get("age").is_none());
+    }
+
+    #[test]
+    fn test_merge_profile_append() {
+        let existing = json!({"tags": ["a"]});
+        let incoming = json!({"tags": ["b", "c"]});
+        let result = merge_profile(&existing, &incoming, "append");
+        assert_eq!(result["tags"], json!(["a", "b", "c"]));
+    }
+
+    #[test]
+    fn test_merge_profile_unknown_op() {
+        let existing = json!({"name": "Alice"});
+        let incoming = json!({"name": "Bob"});
+        let result = merge_profile(&existing, &incoming, "unknown");
+        assert_eq!(result["name"], "Alice");
+    }
+
+    #[test]
+    fn test_merge_profile_empty_existing() {
+        let existing = json!({});
+        let incoming = json!({"name": "Alice"});
+        let result = merge_profile(&existing, &incoming, "set");
+        assert_eq!(result["name"], "Alice");
+    }
+
+    #[test]
+    fn test_parse_client_time_valid() {
+        let data = json!({"client_time": 1705312200000i64});
+        assert!(parse_client_time(&data).is_some());
+    }
+
+    #[test]
+    fn test_parse_client_time_missing() {
+        let data = json!({});
+        assert!(parse_client_time(&data).is_none());
+    }
+
+    #[test]
+    fn test_decimal_from_json_float() {
+        assert!(decimal_from_json(&json!(3.15)).is_some());
+    }
+
+    #[test]
+    fn test_decimal_from_json_string() {
+        assert!(decimal_from_json(&json!("2.718")).is_some());
+    }
+
+    #[test]
+    fn test_decimal_from_json_invalid() {
+        assert!(decimal_from_json(&json!("not_a_number")).is_none());
+    }
+
+    #[test]
+    fn test_event_duration_from_data() {
+        assert!(event_duration(&json!({"event_duration": 1.5})).is_some());
+    }
+
+    #[test]
+    fn test_event_duration_from_properties() {
+        assert!(event_duration(&json!({"properties": {"$event_duration": 2.0}})).is_some());
+    }
+
+    #[test]
+    fn test_event_duration_missing() {
+        assert!(event_duration(&json!({})).is_none());
+    }
+}

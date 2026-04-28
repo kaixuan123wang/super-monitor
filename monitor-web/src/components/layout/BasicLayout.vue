@@ -107,10 +107,7 @@ async function handleLogout() {
         active-text-color="#409eff"
       >
         <template v-for="item in menuRoutes" :key="item.path">
-          <el-sub-menu
-            v-if="item.children && item.children.length"
-            :index="`/${item.path}`"
-          >
+          <el-sub-menu v-if="item.children && item.children.length" :index="`/${item.path}`">
             <template #title>
               <span>{{ item.meta?.title ?? item.name }}</span>
             </template>
@@ -122,10 +119,7 @@ async function handleLogout() {
               {{ sub.meta?.title ?? sub.name }}
             </el-menu-item>
           </el-sub-menu>
-          <el-menu-item
-            v-else
-            :index="`/${item.path}`"
-          >
+          <el-menu-item v-else :index="`/${item.path}`">
             <span>{{ item.meta?.title ?? item.name }}</span>
           </el-menu-item>
         </template>
@@ -136,7 +130,10 @@ async function handleLogout() {
         <span class="basic-layout__title">{{ route.meta?.title ?? '监控平台' }}</span>
         <div class="basic-layout__right">
           <!-- SSE 状态指示 -->
-          <el-tooltip :content="sseConnected ? 'SSE 实时连接中' : '实时连接断开'" placement="bottom">
+          <el-tooltip
+            :content="sseConnected ? 'SSE 实时连接中' : '实时连接断开'"
+            placement="bottom"
+          >
             <span class="sse-dot" :class="{ 'sse-dot--on': sseConnected }" />
           </el-tooltip>
 
@@ -148,12 +145,7 @@ async function handleLogout() {
             style="width: 220px"
             @change="(v: number) => projectStore.setCurrent(v)"
           >
-            <el-option
-              v-for="p in projectStore.list"
-              :key="p.id"
-              :label="p.name"
-              :value="p.id"
-            />
+            <el-option v-for="p in projectStore.list" :key="p.id" :label="p.name" :value="p.id" />
           </el-select>
           <el-button v-else type="primary" size="small" @click="router.push('/projects')">
             新建项目

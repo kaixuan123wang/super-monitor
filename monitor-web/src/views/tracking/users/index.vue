@@ -119,6 +119,11 @@ async function fetchTimeline() {
   }
 }
 
+function searchTimeline() {
+  eventPage.value = 1;
+  fetchTimeline();
+}
+
 function formatTime(value?: string | null) {
   return value ? value.slice(0, 19).replace('T', ' ') : '-';
 }
@@ -172,7 +177,12 @@ watch(
           </el-select>
         </el-form-item>
         <el-form-item v-if="needsValue(draftFilter.operator)" label="属性值">
-          <el-input v-model="draftFilter.value" placeholder="premium" clearable @keyup.enter="addFilter" />
+          <el-input
+            v-model="draftFilter.value"
+            placeholder="premium"
+            clearable
+            @keyup.enter="addFilter"
+          />
         </el-form-item>
         <el-button type="primary" style="width: 100%" @click="addFilter">添加筛选</el-button>
       </el-form>
@@ -231,16 +241,32 @@ watch(
       />
     </section>
 
-    <el-drawer v-model="drawerVisible" size="720px" :title="selectedUser?.distinct_id || '用户详情'">
+    <el-drawer
+      v-model="drawerVisible"
+      size="720px"
+      :title="selectedUser?.distinct_id || '用户详情'"
+    >
       <div v-loading="detailLoading" class="user-detail">
         <div v-if="selectedUser" class="profile-summary">
           <el-descriptions :column="2" border>
-            <el-descriptions-item label="Distinct ID">{{ selectedUser.distinct_id }}</el-descriptions-item>
-            <el-descriptions-item label="User ID">{{ selectedUser.user_id || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="首次访问">{{ formatTime(selectedUser.first_visit_at) }}</el-descriptions-item>
-            <el-descriptions-item label="最近访问">{{ formatTime(selectedUser.last_visit_at) }}</el-descriptions-item>
-            <el-descriptions-item label="事件数">{{ selectedUser.total_events }}</el-descriptions-item>
-            <el-descriptions-item label="会话数">{{ selectedUser.total_sessions }}</el-descriptions-item>
+            <el-descriptions-item label="Distinct ID">{{
+              selectedUser.distinct_id
+            }}</el-descriptions-item>
+            <el-descriptions-item label="User ID">{{
+              selectedUser.user_id || '-'
+            }}</el-descriptions-item>
+            <el-descriptions-item label="首次访问">{{
+              formatTime(selectedUser.first_visit_at)
+            }}</el-descriptions-item>
+            <el-descriptions-item label="最近访问">{{
+              formatTime(selectedUser.last_visit_at)
+            }}</el-descriptions-item>
+            <el-descriptions-item label="事件数">{{
+              selectedUser.total_events
+            }}</el-descriptions-item>
+            <el-descriptions-item label="会话数">{{
+              selectedUser.total_sessions
+            }}</el-descriptions-item>
           </el-descriptions>
         </div>
 
@@ -262,10 +288,10 @@ watch(
             placeholder="事件名过滤"
             clearable
             style="width: 220px"
-            @keyup.enter="fetchTimeline"
-            @clear="fetchTimeline"
+            @keyup.enter="searchTimeline"
+            @clear="searchTimeline"
           />
-          <el-button @click="fetchTimeline">筛选</el-button>
+          <el-button @click="searchTimeline">筛选</el-button>
         </div>
 
         <el-timeline v-if="timeline.length" class="event-timeline">

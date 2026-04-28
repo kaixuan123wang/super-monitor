@@ -25,14 +25,11 @@ const activeTab = computed(() => {
     <el-tabs
       :model-value="activeTab"
       class="tracking-layout__tabs"
-      @tab-click="(tab) => router.push(tabs.find((t) => t.name === tab.paneName)?.path ?? '/tracking/events')"
+      @tab-click="
+        (tab) => router.push(tabs.find((t) => t.name === tab.paneName)?.path ?? '/tracking/events')
+      "
     >
-      <el-tab-pane
-        v-for="t in tabs"
-        :key="t.name"
-        :label="t.label"
-        :name="t.name"
-      />
+      <el-tab-pane v-for="t in tabs" :key="t.name" :label="t.label" :name="t.name" />
     </el-tabs>
     <router-view />
   </div>

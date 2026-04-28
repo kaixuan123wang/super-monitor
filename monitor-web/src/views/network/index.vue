@@ -9,12 +9,8 @@ import {
   type ListNetworkErrorsParams,
 } from '@/api/network';
 import { ElMessage } from 'element-plus';
-import * as echarts from 'echarts/core';
-import { PieChart, BarChart } from 'echarts/charts';
-import { TitleComponent, TooltipComponent, GridComponent, LegendComponent } from 'echarts/components';
-import { CanvasRenderer } from 'echarts/renderers';
-
-echarts.use([PieChart, BarChart, TitleComponent, TooltipComponent, GridComponent, LegendComponent, CanvasRenderer]);
+import { truncate } from '@/utils/common';
+import { useChart } from '@/composables/useChart';
 
 const projectStore = useProjectStore();
 
@@ -37,8 +33,8 @@ const days = ref(7);
 
 const statusRef = ref<HTMLDivElement>();
 const methodRef = ref<HTMLDivElement>();
-let statusChart: echarts.ECharts | null = null;
-let methodChart: echarts.ECharts | null = null;
+const statusChart = useChart(statusRef);
+const methodChart = useChart(methodRef);
 
 async function reload() {
   if (!projectStore.currentId) {
@@ -80,39 +76,47 @@ function renderCharts() {
 }
 
 function renderStatusChart() {
-  if (!statusRef.value || !stats.value) return;
-  if (!statusChart) statusChart = echarts.init(statusRef.value);
+  if (!stats.value) return;
   const data = stats.value.status_distribution.map((d) => ({
     name: String(d.status),
     value: d.count,
   }));
-  statusChart.setOption({
-    tooltip: { trigger: 'item' },
-    legend: { bottom: 0, type: 'scroll' },
-    series: [{
-      type: 'pie',
-      radius: ['40%', '70%'],
-      data,
-      label: { formatter: '{b}: {c} ({d}%)' },
-    }],
-  }, true);
+  statusChart.setOption(
+    {
+      tooltip: { trigger: 'item' },
+      legend: { bottom: 0, type: 'scroll' },
+      series: [
+        {
+          type: 'pie',
+          radius: ['40%', '70%'],
+          data,
+          label: { formatter: '{b}: {c} ({d}%)' },
+        },
+      ],
+    },
+    true
+  );
 }
 
 function renderMethodChart() {
-  if (!methodRef.value || !stats.value) return;
-  if (!methodChart) methodChart = echarts.init(methodRef.value);
+  if (!stats.value) return;
   const data = stats.value.method_distribution.slice(0, 8);
-  methodChart.setOption({
-    tooltip: { trigger: 'axis' },
-    grid: { left: 50, right: 20, top: 20, bottom: 30 },
-    xAxis: { type: 'category', data: data.map((d) => d.method), axisLabel: { fontSize: 11 } },
-    yAxis: { type: 'value', minInterval: 1 },
-    series: [{
-      type: 'bar',
-      data: data.map((d) => d.count),
-      itemStyle: { color: '#409eff' },
-    }],
-  }, true);
+  methodChart.setOption(
+    {
+      tooltip: { trigger: 'axis' },
+      grid: { left: 50, right: 20, top: 20, bottom: 30 },
+      xAxis: { type: 'category', data: data.map((d) => d.method), axisLabel: { fontSize: 11 } },
+      yAxis: { type: 'value', minInterval: 1 },
+      series: [
+        {
+          type: 'bar',
+          data: data.map((d) => d.count),
+          itemStyle: { color: '#409eff' },
+        },
+      ],
+    },
+    true
+  );
 }
 
 function onSearch() {
@@ -134,13 +138,20 @@ function onPageChange(p: number) {
   reload();
 }
 
+function onResize() {
+  statusChart?.resize();
+  methodChart?.resize();
+}
+
 function formatStatus(status?: number | null): string {
   if (status === undefined || status === null) return '-';
   if (status === 0) return '0 (网络错误)';
   return String(status);
 }
 
-function statusTagType(status?: number | null): 'primary' | 'success' | 'warning' | 'info' | 'danger' {
+function statusTagType(
+  status?: number | null
+): 'primary' | 'success' | 'warning' | 'info' | 'danger' {
   if (status === undefined || status === null) return 'info';
   if (status === 0) return 'danger';
   if (status >= 500) return 'danger';
@@ -148,20 +159,18 @@ function statusTagType(status?: number | null): 'primary' | 'success' | 'warning
   return 'success';
 }
 
-function truncate(str?: string | null, len = 60): string {
-  if (!str) return '-';
-  return str.length > len ? str.slice(0, len) + '...' : str;
-}
-
 onMounted(() => {
   reload();
   fetchStats();
 });
 
-watch(() => projectStore.currentId, () => {
-  reload();
-  fetchStats();
-});
+watch(
+  () => projectStore.currentId,
+  () => {
+    reload();
+    fetchStats();
+  }
+);
 </script>
 
 <template>
@@ -202,19 +211,43 @@ watch(() => projectStore.currentId, () => {
     <el-card shadow="never" class="filter-card">
       <template #header><span>接口报错列表</span></template>
       <div class="toolbar">
-        <el-input v-model="filter.keyword" placeholder="搜索 URL / 错误类型 / Body" clearable style="width: 260px"
-          @keyup.enter="onSearch" @clear="onSearch" />
-        <el-input v-model="filter.url" placeholder="URL 筛选" clearable style="width: 200px"
-          @keyup.enter="onSearch" @clear="onSearch" />
-        <el-select v-model="filter.method" placeholder="方法" clearable style="width: 100px" @change="onSearch">
+        <el-input
+          v-model="filter.keyword"
+          placeholder="搜索 URL / 错误类型 / Body"
+          clearable
+          style="width: 260px"
+          @keyup.enter="onSearch"
+          @clear="onSearch"
+        />
+        <el-input
+          v-model="filter.url"
+          placeholder="URL 筛选"
+          clearable
+          style="width: 200px"
+          @keyup.enter="onSearch"
+          @clear="onSearch"
+        />
+        <el-select
+          v-model="filter.method"
+          placeholder="方法"
+          clearable
+          style="width: 100px"
+          @change="onSearch"
+        >
           <el-option label="GET" value="GET" />
           <el-option label="POST" value="POST" />
           <el-option label="PUT" value="PUT" />
           <el-option label="DELETE" value="DELETE" />
           <el-option label="PATCH" value="PATCH" />
         </el-select>
-        <el-input-number v-model="filter.status" placeholder="状态码" :min="0" :max="599" style="width: 110px"
-          @change="onSearch" />
+        <el-input-number
+          v-model="filter.status"
+          placeholder="状态码"
+          :min="0"
+          :max="599"
+          style="width: 110px"
+          @change="onSearch"
+        />
         <el-button type="primary" @click="onSearch">搜索</el-button>
         <el-button @click="onReset">重置</el-button>
       </div>
@@ -230,7 +263,9 @@ watch(() => projectStore.currentId, () => {
         </el-table-column>
         <el-table-column label="状态码" width="100" align="center">
           <template #default="{ row }">
-            <el-tag size="small" :type="statusTagType(row.status)">{{ formatStatus(row.status) }}</el-tag>
+            <el-tag size="small" :type="statusTagType(row.status)">{{
+              formatStatus(row.status)
+            }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="耗时 (ms)" prop="duration" width="100" align="right" />

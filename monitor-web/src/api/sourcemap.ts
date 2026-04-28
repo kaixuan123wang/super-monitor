@@ -1,5 +1,5 @@
-import { get, del } from '@/utils/request';
-import axios from 'axios';
+import { get, post, del } from '@/utils/request';
+import type { ApiResponse } from '@/utils/request';
 
 export interface SourceMap {
   id: number;
@@ -35,14 +35,14 @@ export function uploadSourceMap(
   project_id: number,
   release: string,
   file: File,
-  onProgress?: (pct: number) => void,
-) {
+  onProgress?: (pct: number) => void
+): Promise<ApiResponse<SourceMap>> {
   const form = new FormData();
   form.append('project_id', String(project_id));
   form.append('release', release);
   form.append('file', file);
 
-  return axios.post('/api/sourcemaps', form, {
+  return post<SourceMap>('/sourcemaps', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
     onUploadProgress: (e) => {
       if (onProgress && e.total) {

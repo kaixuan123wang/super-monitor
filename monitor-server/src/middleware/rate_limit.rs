@@ -22,18 +22,14 @@ pub struct RateLimitConfig {
 
 impl Default for RateLimitConfig {
     fn default() -> Self {
-        Self {
-            requests_per_second: 10,
-            burst_size: 20,
-            key_prefix: "rate_limit".into(),
-        }
+        Self { requests_per_second: 10, burst_size: 20, key_prefix: "rate_limit".into() }
     }
 }
 
 /// 基于 Redis 的 Token Bucket 限流中间件。
 ///
-/// 使用 Redis 存储每个 key 的剩余 token 数和上次更新时间，
-/// 支持分布式部署下的统一限流。
+/// 使用 AppState 中的共享 Redis 连接，避免每个请求创建新连接。
+/// 若 Redis 不可用则放行（降级）。
 pub async fn rate_limit(
     State(state): State<AppState>,
     req: Request,
@@ -42,16 +38,15 @@ pub async fn rate_limit(
     let cfg = RateLimitConfig::default();
     let key = format!("{}:{}", cfg.key_prefix, client_ip(&req));
 
-    // 尝试从 Redis 检查限流
-    if let Ok(allowed) = check_redis_limit(&state.config.redis_url,
-        &key,
-        cfg.requests_per_second,
-        cfg.burst_size,
-    ).await {
-        if !allowed {
-            return Err(AppError::TooManyRequests(
-                "请求过于频繁，请稍后再试".into(),
-            ));
+    // 使用共享的 Redis 连接
+    if let Some(ref conn) = state.redis {
+        let mut conn = conn.clone();
+        if let Ok(allowed) =
+            check_redis_limit(&mut conn, &key, cfg.requests_per_second, cfg.burst_size).await
+        {
+            if !allowed {
+                return Err(AppError::TooManyRequests("请求过于频繁，请稍后再试".into()));
+            }
         }
     }
 
@@ -61,33 +56,27 @@ pub async fn rate_limit(
 /// 从请求中提取客户端 IP。
 fn client_ip(req: &Request) -> String {
     req.headers()
-        .get("x-forwarded-for")
+        .get("x-real-ip")
         .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').next())
         .map(|s| s.trim().to_string())
         .or_else(|| {
             req.headers()
-                .get("x-real-ip")
+                .get("x-forwarded-for")
                 .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_string())
+                .and_then(|s| s.split(',').next_back())
+                .map(|s| s.trim().to_string())
         })
         .unwrap_or_else(|| "unknown".into())
 }
 
 /// 使用 Redis 执行 Token Bucket 限流检查。
-/// 若 Redis 不可用则放行（降级）。
 async fn check_redis_limit(
-    redis_url: &str,
+    conn: &mut redis::aio::MultiplexedConnection,
     key: &str,
     rate: u32,
     burst: u32,
 ) -> Result<bool, Box<dyn std::error::Error>> {
-    let client = redis::Client::open(redis_url)?;
-    let mut conn = client.get_multiplexed_async_connection().await?;
-
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)?
-        .as_secs_f64();
+    let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64();
 
     // Lua 脚本：原子性更新 token bucket
     let script = r#"
@@ -129,8 +118,64 @@ async fn check_redis_limit(
         .arg(rate)
         .arg(burst)
         .arg(now)
-        .query_async(&mut conn)
+        .query_async(conn)
         .await?;
 
     Ok(result == 1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rate_limit_config_defaults() {
+        let cfg = RateLimitConfig::default();
+        assert_eq!(cfg.requests_per_second, 10);
+        assert_eq!(cfg.burst_size, 20);
+        assert_eq!(cfg.key_prefix, "rate_limit");
+    }
+
+    #[test]
+    fn test_client_ip_from_x_forwarded_for() {
+        let req = Request::builder()
+            .header("x-forwarded-for", "1.2.3.4, 5.6.7.8")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        assert_eq!(client_ip(&req), "5.6.7.8");
+    }
+
+    #[test]
+    fn test_client_ip_from_x_real_ip() {
+        let req = Request::builder()
+            .header("x-real-ip", "10.0.0.1")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        assert_eq!(client_ip(&req), "10.0.0.1");
+    }
+
+    #[test]
+    fn test_client_ip_forwarded_for_takes_priority() {
+        let req = Request::builder()
+            .header("x-forwarded-for", "1.1.1.1")
+            .header("x-real-ip", "2.2.2.2")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        assert_eq!(client_ip(&req), "2.2.2.2");
+    }
+
+    #[test]
+    fn test_client_ip_unknown_fallback() {
+        let req = Request::builder().body(axum::body::Body::empty()).unwrap();
+        assert_eq!(client_ip(&req), "unknown");
+    }
+
+    #[test]
+    fn test_client_ip_single_forwarded() {
+        let req = Request::builder()
+            .header("x-forwarded-for", "192.168.1.1")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        assert_eq!(client_ip(&req), "192.168.1.1");
+    }
 }

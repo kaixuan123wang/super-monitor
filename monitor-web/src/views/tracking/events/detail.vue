@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue';
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useProjectStore } from '@/stores/project';
 import { getEventDetail, type EventDetail } from '@/api/tracking';
@@ -14,17 +14,20 @@ const route = useRoute();
 const router = useRouter();
 const projectStore = useProjectStore();
 
-const eventName = decodeURIComponent(route.params.eventName as string);
 const loading = ref(false);
 const detail = ref<EventDetail | null>(null);
 const trendRef = ref<HTMLDivElement>();
 let chart: echarts.ECharts | null = null;
 
+function getEventName(): string {
+  return decodeURIComponent(route.params.eventName as string);
+}
+
 async function fetchDetail() {
   if (!projectStore.currentId) return;
   loading.value = true;
   try {
-    const res = await getEventDetail(eventName, projectStore.currentId);
+    const res = await getEventDetail(getEventName(), projectStore.currentId);
     detail.value = res.data;
     await nextTick();
     renderChart();
@@ -57,8 +60,22 @@ function renderChart() {
   });
 }
 
-onMounted(fetchDetail);
-onUnmounted(() => chart?.dispose());
+onMounted(() => {
+  fetchDetail();
+  window.addEventListener('resize', onResize);
+});
+onUnmounted(() => {
+  chart?.dispose();
+  chart = null;
+  window.removeEventListener('resize', onResize);
+});
+
+watch(() => projectStore.currentId, fetchDetail);
+watch(() => route.params.eventName, fetchDetail);
+
+function onResize() {
+  chart?.resize();
+}
 </script>
 
 <template>
@@ -81,12 +98,7 @@ onUnmounted(() => chart?.dispose());
     <el-card shadow="never" style="margin-top: 16px">
       <template #header><span>属性列表</span></template>
       <template v-if="detail?.properties?.length">
-        <el-tag
-          v-for="prop in detail.properties"
-          :key="prop"
-          style="margin: 4px"
-          size="small"
-        >
+        <el-tag v-for="prop in detail.properties" :key="prop" style="margin: 4px" size="small">
           {{ prop }}
         </el-tag>
       </template>

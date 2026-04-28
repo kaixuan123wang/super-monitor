@@ -245,7 +245,125 @@ fn parse_ai_response(content: &str) -> Result<Value, serde_json::Error> {
     serde_json::from_str(json_str)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_error() -> models::js_error::Model {
+        models::js_error::Model {
+            id: 1,
+            project_id: 1,
+            app_id: "app".into(),
+            message: "TypeError: undefined is not a function".into(),
+            error_type: "TypeError".into(),
+            stack: Some("at foo (app.js:1:1)".into()),
+            source_url: Some("app.js".into()),
+            line: Some(1),
+            column: Some(1),
+            url: Some("https://example.com".into()),
+            browser: Some("Chrome".into()),
+            browser_version: Some("120".into()),
+            os: Some("macOS".into()),
+            os_version: Some("14".into()),
+            device: None,
+            device_type: None,
+            user_agent: None,
+            fingerprint: Some("fp1".into()),
+            release: Some("v1.0".into()),
+            environment: Some("production".into()),
+            sdk_version: Some("1.0.0".into()),
+            is_ai_analyzed: false,
+            distinct_id: None,
+            referrer: None,
+            viewport: None,
+            screen_resolution: None,
+            language: None,
+            timezone: None,
+            breadcrumb: None,
+            extra: None,
+            created_at: chrono::Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()),
+        }
+    }
+
+    #[test]
+    fn test_build_prompt_includes_error_message() {
+        let error = sample_error();
+        let prompt = build_prompt(&error, Some("mapped stack"));
+        assert!(prompt.contains("TypeError: undefined is not a function"));
+        assert!(prompt.contains("TypeError"));
+        assert!(prompt.contains("mapped stack"));
+        assert!(prompt.contains("https://example.com"));
+        assert!(prompt.contains("Chrome"));
+    }
+
+    #[test]
+    fn test_build_prompt_no_mapped_stack() {
+        let mut error = sample_error();
+        error.message = "Error".into();
+        error.stack = None;
+        let prompt = build_prompt(&error, None);
+        assert!(prompt.contains("Error"));
+        assert!(prompt.contains("(无 Source Map)"));
+    }
+
+    #[test]
+    fn test_build_suggestion_text() {
+        let parsed = json!({
+            "root_cause": "null pointer",
+            "fix_suggestion": "check before use"
+        });
+        let text = build_suggestion_text(&parsed);
+        assert!(text.contains("null pointer"));
+        assert!(text.contains("check before use"));
+    }
+
+    #[test]
+    fn test_build_suggestion_text_missing_fields() {
+        let parsed = json!({});
+        let text = build_suggestion_text(&parsed);
+        assert!(text.contains("【根因分析】"));
+        assert!(text.contains("【修复建议】"));
+    }
+
+    #[test]
+    fn test_parse_ai_response_valid_json() {
+        let content = r#"{"severity": 1, "confidence": 0.8}"#;
+        let result = parse_ai_response(content).unwrap();
+        assert_eq!(result["severity"], 1);
+        assert_eq!(result["confidence"], 0.8);
+    }
+
+    #[test]
+    fn test_parse_ai_response_with_markdown() {
+        let content = r#"Some text before
+```json
+{"severity": 2}
+```
+Some text after"#;
+        let result = parse_ai_response(content).unwrap();
+        assert_eq!(result["severity"], 2);
+    }
+
+    #[test]
+    fn test_parse_ai_response_invalid_json() {
+        let content = "not json at all";
+        assert!(parse_ai_response(content).is_err());
+    }
+
+    #[test]
+    fn test_parse_ai_response_empty() {
+        assert!(parse_ai_response("").is_err());
+    }
+
+    #[test]
+    fn test_now_fixed_is_utc() {
+        let t = now_fixed();
+        assert_eq!(t.offset().local_minus_utc(), 0);
+    }
+}
+
 /// 调用 OpenAI 兼容接口，返回 (content, prompt_tokens, completion_tokens)。
+#[allow(clippy::items_after_test_module)]
 async fn call_llm(
     api_base: &str,
     api_key: &str,

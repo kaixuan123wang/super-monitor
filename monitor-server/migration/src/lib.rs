@@ -13,6 +13,7 @@ mod m20240401_000001_create_ai_analyses_table;
 mod m20240401_000002_create_alert_tables;
 mod m20240401_000003_create_funnel_retention_sourcemap_tables;
 mod m20240401_000004_add_track_event_context_columns;
+mod m20240501_000001_add_performance_indexes;
 
 pub struct Migrator;
 
@@ -33,6 +34,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20240401_000002_create_alert_tables::Migration),
             Box::new(m20240401_000003_create_funnel_retention_sourcemap_tables::Migration),
             Box::new(m20240401_000004_add_track_event_context_columns::Migration),
+            Box::new(m20240501_000001_add_performance_indexes::Migration),
         ]
     }
 }

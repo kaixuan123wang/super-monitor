@@ -47,7 +47,10 @@ async function fetchList() {
   }
 }
 
-function onSearch() { page.value = 1; fetchList(); }
+function onSearch() {
+  page.value = 1;
+  fetchList();
+}
 function goDetail(row: EventItem) {
   router.push(`/tracking/events/${encodeURIComponent(row.event)}`);
 }
@@ -76,12 +79,22 @@ async function fetchDefs() {
   }
 }
 
+function searchDefs() {
+  defPage.value = 1;
+  fetchDefs();
+}
+
 // 创建/编辑 dialog
 const dialogVisible = ref(false);
 const isEdit = ref(false);
 const editingId = ref<number | null>(null);
 
-const defaultProp = (): PropertyDef => ({ name: '', type: 'string', description: '', required: false });
+const defaultProp = (): PropertyDef => ({
+  name: '',
+  type: 'string',
+  description: '',
+  required: false,
+});
 
 const form = reactive({
   event_name: '',
@@ -141,14 +154,22 @@ async function submitForm() {
     }
     dialogVisible.value = false;
     fetchDefs();
-  } catch { /* error shown by request interceptor */ }
+  } catch {
+    /* error shown by request interceptor */
+  }
 }
 
 async function deleteDef(row: EventDefinition) {
-  await ElMessageBox.confirm(`确定删除事件定义「${row.event_name}」？`, '警告', { type: 'warning' });
-  await deleteDefinition(row.id);
-  ElMessage.success('已删除');
-  fetchDefs();
+  try {
+    await ElMessageBox.confirm(`确定删除事件定义「${row.event_name}」？`, '警告', {
+      type: 'warning',
+    });
+    await deleteDefinition(row.id);
+    ElMessage.success('已删除');
+    fetchDefs();
+  } catch {
+    // 用户取消或请求失败
+  }
 }
 
 // ── 属性管理 ───────────────────────────────────────────────────────
@@ -174,11 +195,14 @@ function onTabChange(tab: 'collected' | 'definitions' | 'properties') {
 }
 
 onMounted(() => fetchList());
-watch(() => projectStore.currentId, () => {
-  if (activeTab.value === 'collected') fetchList();
-  else if (activeTab.value === 'definitions') fetchDefs();
-  else fetchProps();
-});
+watch(
+  () => projectStore.currentId,
+  () => {
+    if (activeTab.value === 'collected') fetchList();
+    else if (activeTab.value === 'definitions') fetchDefs();
+    else fetchProps();
+  }
+);
 </script>
 
 <template>
@@ -193,8 +217,14 @@ watch(() => projectStore.currentId, () => {
     <!-- ── 已采集事件 ── -->
     <template v-if="activeTab === 'collected'">
       <div class="toolbar">
-        <el-input v-model="keyword" placeholder="搜索事件名" clearable style="width: 260px"
-          @keyup.enter="onSearch" @clear="onSearch" />
+        <el-input
+          v-model="keyword"
+          placeholder="搜索事件名"
+          clearable
+          style="width: 260px"
+          @keyup.enter="onSearch"
+          @clear="onSearch"
+        />
         <el-button type="primary" @click="onSearch">搜索</el-button>
       </div>
       <el-table v-loading="loading" :data="list" style="width: 100%">
@@ -214,17 +244,29 @@ watch(() => projectStore.currentId, () => {
         <el-table-column label="独立用户" prop="unique_users" width="110" align="right" />
         <el-table-column label="最后上报" prop="last_seen" width="180" />
       </el-table>
-      <el-pagination v-if="total > pageSize" v-model:current-page="page"
-        :page-size="pageSize" :total="total" layout="prev, pager, next, total"
-        class="pagination" @current-change="fetchList" />
+      <el-pagination
+        v-if="total > pageSize"
+        v-model:current-page="page"
+        :page-size="pageSize"
+        :total="total"
+        layout="prev, pager, next, total"
+        class="pagination"
+        @current-change="fetchList"
+      />
     </template>
 
     <!-- ── 事件定义管理 ── -->
     <template v-if="activeTab === 'definitions'">
       <div class="toolbar">
-        <el-input v-model="defKeyword" placeholder="搜索事件名" clearable style="width: 260px"
-          @keyup.enter="fetchDefs" @clear="fetchDefs" />
-        <el-button @click="fetchDefs">搜索</el-button>
+        <el-input
+          v-model="defKeyword"
+          placeholder="搜索事件名"
+          clearable
+          style="width: 260px"
+          @keyup.enter="searchDefs"
+          @clear="searchDefs"
+        />
+        <el-button @click="searchDefs">搜索</el-button>
         <el-button type="primary" @click="openCreate">+ 新建事件定义</el-button>
       </div>
       <el-table v-loading="defLoading" :data="defList" style="width: 100%">
@@ -248,9 +290,15 @@ watch(() => projectStore.currentId, () => {
           </template>
         </el-table-column>
       </el-table>
-      <el-pagination v-if="defTotal > 20" v-model:current-page="defPage"
-        :page-size="20" :total="defTotal" layout="prev, pager, next, total"
-        class="pagination" @current-change="fetchDefs" />
+      <el-pagination
+        v-if="defTotal > 20"
+        v-model:current-page="defPage"
+        :page-size="20"
+        :total="defTotal"
+        layout="prev, pager, next, total"
+        class="pagination"
+        @current-change="fetchDefs"
+      />
     </template>
 
     <!-- ── 属性管理 ── -->
@@ -268,14 +316,20 @@ watch(() => projectStore.currentId, () => {
         <el-table-column label="说明" prop="description" min-width="160" show-overflow-tooltip />
         <el-table-column label="关联事件" min-width="200">
           <template #default="{ row }">
-            <el-tag v-for="e in row.event_names" :key="e" size="small" style="margin: 2px">{{ e }}</el-tag>
+            <el-tag v-for="e in row.event_names" :key="e" size="small" style="margin: 2px">{{
+              e
+            }}</el-tag>
           </template>
         </el-table-column>
       </el-table>
     </template>
 
     <!-- ── 创建/编辑 Dialog ── -->
-    <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑事件定义' : '新建事件定义'" width="640px">
+    <el-dialog
+      v-model="dialogVisible"
+      :title="isEdit ? '编辑事件定义' : '新建事件定义'"
+      width="640px"
+    >
       <el-form label-width="90px">
         <el-form-item label="事件名" required>
           <el-input v-model="form.event_name" :disabled="isEdit" placeholder="如: button_click" />
@@ -291,11 +345,7 @@ watch(() => projectStore.currentId, () => {
         </el-form-item>
         <el-form-item label="属性定义">
           <div style="width: 100%">
-            <div
-              v-for="(prop, idx) in form.properties"
-              :key="idx"
-              class="prop-row"
-            >
+            <div v-for="(prop, idx) in form.properties" :key="idx" class="prop-row">
               <el-input v-model="prop.name" placeholder="属性名" style="width: 130px" />
               <el-select v-model="prop.type" style="width: 100px">
                 <el-option label="string" value="string" />
@@ -307,7 +357,9 @@ watch(() => projectStore.currentId, () => {
               <el-checkbox v-model="prop.required" label="必填" />
               <el-button link type="danger" @click="form.properties.splice(idx, 1)">删除</el-button>
             </div>
-            <el-button size="small" @click="form.properties.push(defaultProp())">+ 添加属性</el-button>
+            <el-button size="small" @click="form.properties.push(defaultProp())"
+              >+ 添加属性</el-button
+            >
           </div>
         </el-form-item>
       </el-form>

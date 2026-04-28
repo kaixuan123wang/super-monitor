@@ -65,14 +65,8 @@ async fn merge_events(
     login_id: &str,
 ) -> AppResult<()> {
     models::TrackEvent::update_many()
-        .col_expr(
-            models::track_event::Column::DistinctId,
-            Expr::value(login_id.to_string()),
-        )
-        .col_expr(
-            models::track_event::Column::UserId,
-            Expr::value(login_id.to_string()),
-        )
+        .col_expr(models::track_event::Column::DistinctId, Expr::value(login_id.to_string()))
+        .col_expr(models::track_event::Column::UserId, Expr::value(login_id.to_string()))
         .col_expr(models::track_event::Column::IsLoginId, Expr::value(true))
         .filter(models::track_event::Column::ProjectId.eq(project_id))
         .filter(models::track_event::Column::DistinctId.eq(anonymous_id))
@@ -110,7 +104,9 @@ async fn merge_profile(
             am.total_sessions = Set(anon.total_sessions + login.total_sessions);
             am.updated_at = Set(now_fixed());
             am.update(db).await?;
-            models::TrackUserProfile::delete_by_id(anon.id).exec(db).await?;
+            models::TrackUserProfile::delete_by_id(anon.id)
+                .exec(db)
+                .await?;
         }
         (Some(anon), None) => {
             let mut am: models::track_user_profile::ActiveModel = anon.into();
@@ -186,5 +182,121 @@ fn max_time(
         (Some(a), None) => Some(a),
         (None, Some(b)) => Some(b),
         (None, None) => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn test_merge_properties_both_objects() {
+        let anon = json!({"a": 1, "b": 2});
+        let login = json!({"b": 3, "c": 4});
+        let result = merge_properties(&anon, &login);
+        assert_eq!(result["a"], 1);
+        assert_eq!(result["b"], 3); // login overwrites
+        assert_eq!(result["c"], 4);
+    }
+
+    #[test]
+    fn test_merge_properties_anon_not_object() {
+        let anon = json!("not object");
+        let login = json!({"a": 1});
+        let result = merge_properties(&anon, &login);
+        assert_eq!(result["a"], 1);
+    }
+
+    #[test]
+    fn test_merge_properties_login_not_object() {
+        let anon = json!({"a": 1});
+        let login = json!("not object");
+        let result = merge_properties(&anon, &login);
+        assert_eq!(result["a"], 1);
+    }
+
+    #[test]
+    fn test_merge_properties_empty() {
+        let result = merge_properties(&json!({}), &json!({}));
+        assert_eq!(result, json!({}));
+    }
+
+    #[test]
+    fn test_min_time_both_some() {
+        let a = FixedOffset::east_opt(0)
+            .unwrap()
+            .with_ymd_and_hms(2024, 1, 1, 0, 0, 0)
+            .unwrap();
+        let b = FixedOffset::east_opt(0)
+            .unwrap()
+            .with_ymd_and_hms(2024, 1, 2, 0, 0, 0)
+            .unwrap();
+        assert_eq!(min_time(Some(a), Some(b)), Some(a));
+    }
+
+    #[test]
+    fn test_min_time_first_none() {
+        let b = FixedOffset::east_opt(0)
+            .unwrap()
+            .with_ymd_and_hms(2024, 1, 1, 0, 0, 0)
+            .unwrap();
+        assert_eq!(min_time(None, Some(b)), Some(b));
+    }
+
+    #[test]
+    fn test_min_time_second_none() {
+        let a = FixedOffset::east_opt(0)
+            .unwrap()
+            .with_ymd_and_hms(2024, 1, 1, 0, 0, 0)
+            .unwrap();
+        assert_eq!(min_time(Some(a), None), Some(a));
+    }
+
+    #[test]
+    fn test_min_time_both_none() {
+        assert_eq!(min_time(None, None), None);
+    }
+
+    #[test]
+    fn test_max_time_both_some() {
+        let a = FixedOffset::east_opt(0)
+            .unwrap()
+            .with_ymd_and_hms(2024, 1, 1, 0, 0, 0)
+            .unwrap();
+        let b = FixedOffset::east_opt(0)
+            .unwrap()
+            .with_ymd_and_hms(2024, 1, 2, 0, 0, 0)
+            .unwrap();
+        assert_eq!(max_time(Some(a), Some(b)), Some(b));
+    }
+
+    #[test]
+    fn test_max_time_first_none() {
+        let b = FixedOffset::east_opt(0)
+            .unwrap()
+            .with_ymd_and_hms(2024, 1, 1, 0, 0, 0)
+            .unwrap();
+        assert_eq!(max_time(None, Some(b)), Some(b));
+    }
+
+    #[test]
+    fn test_max_time_second_none() {
+        let a = FixedOffset::east_opt(0)
+            .unwrap()
+            .with_ymd_and_hms(2024, 1, 1, 0, 0, 0)
+            .unwrap();
+        assert_eq!(max_time(Some(a), None), Some(a));
+    }
+
+    #[test]
+    fn test_max_time_both_none() {
+        assert_eq!(max_time(None, None), None);
+    }
+
+    #[test]
+    fn test_now_fixed_is_utc() {
+        let now = now_fixed();
+        assert_eq!(now.offset().local_minus_utc(), 0);
     }
 }

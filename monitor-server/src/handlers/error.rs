@@ -3,7 +3,7 @@
 //! Phase 2 实现列表 + 详情。聚合/趋势/相似错误留到 Phase 3+。
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Extension, Path, Query, State},
     Json,
 };
 use sea_orm::{
@@ -13,6 +13,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::error::{AppError, AppResult};
+use crate::middleware::auth::{check_project_access, CurrentUser};
 use crate::models;
 use crate::router::AppState;
 
@@ -41,9 +42,11 @@ fn default_page_size() -> u64 {
 
 pub async fn list(
     State(state): State<AppState>,
+    Extension(current_user): Extension<CurrentUser>,
     Query(q): Query<ListQuery>,
 ) -> AppResult<Json<Value>> {
     let db = get_db(&state)?;
+    check_project_access(db, &current_user, q.project_id).await?;
     use models::js_error::Column;
 
     let mut cursor = models::JsError::find().filter(Column::ProjectId.eq(q.project_id));
@@ -69,9 +72,10 @@ pub async fn list(
         cursor = cursor.filter(Column::Message.contains(k));
     }
 
+    let page_size = q.page_size.clamp(1, 100);
     let paginator = cursor
         .order_by_desc(Column::CreatedAt)
-        .paginate(db, q.page_size);
+        .paginate(db, page_size);
     let total = paginator.num_items().await?;
     let items = paginator.fetch_page(q.page.saturating_sub(1)).await?;
 
@@ -81,15 +85,16 @@ pub async fn list(
         "data": { "list": items, "total": total },
         "pagination": {
             "page": q.page,
-            "page_size": q.page_size,
+            "page_size": page_size,
             "total": total,
-            "total_pages": (total as f64 / q.page_size as f64).ceil() as u64
+            "total_pages": (total as f64 / page_size as f64).ceil() as u64
         }
     })))
 }
 
 pub async fn detail(
     State(state): State<AppState>,
+    Extension(current_user): Extension<CurrentUser>,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
     let db = get_db(&state)?;
@@ -97,6 +102,7 @@ pub async fn detail(
         .one(db)
         .await?
         .ok_or(AppError::NotFound)?;
+    check_project_access(db, &current_user, item.project_id).await?;
     Ok(Json(json!({ "code": 0, "message": "ok", "data": item })))
 }
 
@@ -105,4 +111,42 @@ fn get_db(state: &AppState) -> AppResult<&DatabaseConnection> {
         .db
         .as_ref()
         .ok_or_else(|| AppError::Internal("database not connected".into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_list_query_defaults() {
+        let q: ListQuery = serde_json::from_str(r#"{"project_id":1}"#).unwrap();
+        assert_eq!(q.project_id, 1);
+        assert_eq!(q.page, 1);
+        assert_eq!(q.page_size, 20);
+        assert!(q.error_type.is_none());
+        assert!(q.fingerprint.is_none());
+        assert!(q.browser.is_none());
+        assert!(q.os.is_none());
+        assert!(q.release.is_none());
+        assert!(q.environment.is_none());
+        assert!(q.keyword.is_none());
+    }
+
+    #[test]
+    fn test_list_query_with_filters() {
+        let q: ListQuery = serde_json::from_str(
+            r#"{"project_id":1,"error_type":"TypeError","browser":"Chrome","os":"Windows"}"#,
+        )
+        .unwrap();
+        assert_eq!(q.error_type.as_deref(), Some("TypeError"));
+        assert_eq!(q.browser.as_deref(), Some("Chrome"));
+        assert_eq!(q.os.as_deref(), Some("Windows"));
+    }
+
+    #[test]
+    fn test_list_query_with_keyword() {
+        let q: ListQuery =
+            serde_json::from_str(r#"{"project_id":1,"keyword":"undefined"}"#).unwrap();
+        assert_eq!(q.keyword.as_deref(), Some("undefined"));
+    }
 }

@@ -1,0 +1,41 @@
+# Rustfmt 配置文件
+
+# 最大行宽
+max_width = 100
+
+# 缩进
+tab_spaces = 4
+
+# 导入排序
+imports_granularity = "Crate"
+group_imports = "StdExternalCrate"
+
+# 函数参数
+fn_params_layout = "Tall"
+
+# 控制流
+control_brace_style = "AlwaysSameLine"
+
+# 链式调用
+chain_width = 60
+
+# 单行 if/else
+single_line_if_else_max_width = 50
+
+# 单行 let
+single_line_let_else_max_width = 50
+
+# 注释
+comment_width = 80
+wrap_comments = false
+normalize_comments = false
+
+# 闭合分号
+trailing_semicolon = true
+
+# 格式化代码示例
+format_code_in_doc_comments = true
+doc_comment_code_block_width = 100
+
+# 源码
+use_small_heuristics = "Max"

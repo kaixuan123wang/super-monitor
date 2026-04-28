@@ -175,10 +175,18 @@ export interface FunnelAnalysisResult {
 }
 
 export function listFunnels(project_id: number) {
-  return get<{ list: TrackFunnel[]; total: number }>('/tracking/funnels', { params: { project_id } });
+  return get<{ list: TrackFunnel[]; total: number }>('/tracking/funnels', {
+    params: { project_id },
+  });
 }
 
-export function createFunnel(body: { project_id: number; name: string; description?: string; steps: FunnelStep[]; window_minutes?: number }) {
+export function createFunnel(body: {
+  project_id: number;
+  name: string;
+  description?: string;
+  steps: FunnelStep[];
+  window_minutes?: number;
+}) {
   return post<TrackFunnel>('/tracking/funnels', body);
 }
 
@@ -186,7 +194,10 @@ export function getFunnel(id: number) {
   return get<TrackFunnel>(`/tracking/funnels/${id}`);
 }
 
-export function updateFunnel(id: number, body: Partial<Pick<TrackFunnel, 'name' | 'description' | 'steps' | 'window_minutes'>>) {
+export function updateFunnel(
+  id: number,
+  body: Partial<Pick<TrackFunnel, 'name' | 'description' | 'steps' | 'window_minutes'>>
+) {
   return put<TrackFunnel>(`/tracking/funnels/${id}`, body);
 }
 
@@ -206,9 +217,8 @@ export interface AnalyzeFunnelOptions {
 }
 
 export function analyzeFunnel(id: number, daysOrOptions: number | AnalyzeFunnelOptions = 7) {
-  const body = typeof daysOrOptions === 'number'
-    ? { time_range: { days: daysOrOptions } }
-    : daysOrOptions;
+  const body =
+    typeof daysOrOptions === 'number' ? { time_range: { days: daysOrOptions } } : daysOrOptions;
   return post<FunnelAnalysisResult>(`/tracking/funnels/${id}/analyze`, body);
 }
 
@@ -239,7 +249,9 @@ export interface RetentionResult {
 }
 
 export function listRetentions(project_id: number) {
-  return get<{ list: TrackRetentionConfig[]; total: number }>('/tracking/retentions', { params: { project_id } });
+  return get<{ list: TrackRetentionConfig[]; total: number }>('/tracking/retentions', {
+    params: { project_id },
+  });
 }
 
 export function createRetention(body: {
@@ -260,9 +272,10 @@ export interface AnalyzeRetentionOptions {
 }
 
 export function analyzeRetention(id: number, daysOrOptions: number | AnalyzeRetentionOptions = 14) {
-  const body = typeof daysOrOptions === 'number'
-    ? { time_range: { days: daysOrOptions }, retention_type: 'day' }
-    : daysOrOptions;
+  const body =
+    typeof daysOrOptions === 'number'
+      ? { time_range: { days: daysOrOptions }, retention_type: 'day' }
+      : daysOrOptions;
   return post<RetentionResult>(`/tracking/retentions/${id}/analyze`, body);
 }
 

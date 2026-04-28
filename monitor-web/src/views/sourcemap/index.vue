@@ -38,10 +38,14 @@ async function fetchList() {
 }
 
 async function handleDelete(row: SourceMap) {
-  await ElMessageBox.confirm(`确认删除 ${row.filename} ?`, '确认', { type: 'warning' });
-  await deleteSourceMap(row.id);
-  ElMessage.success('已删除');
-  fetchList();
+  try {
+    await ElMessageBox.confirm(`确认删除 ${row.filename} ?`, '确认', { type: 'warning' });
+    await deleteSourceMap(row.id);
+    ElMessage.success('已删除');
+    fetchList();
+  } catch {
+    // 用户取消或请求失败
+  }
 }
 
 function onFileChange(file: UploadFile) {
@@ -49,20 +53,27 @@ function onFileChange(file: UploadFile) {
   return false;
 }
 
+function onFileRemove() {
+  uploadFile.value = null;
+}
+
 async function doUpload() {
   if (!projectStore.currentId) return;
-  if (!uploadRelease.value) { ElMessage.warning('请输入 Release 版本号'); return; }
-  if (!uploadFile.value) { ElMessage.warning('请选择文件'); return; }
+  if (!uploadRelease.value) {
+    ElMessage.warning('请输入 Release 版本号');
+    return;
+  }
+  if (!uploadFile.value) {
+    ElMessage.warning('请选择文件');
+    return;
+  }
 
   uploading.value = true;
   uploadProgress.value = 0;
   try {
-    await uploadSourceMap(
-      projectStore.currentId,
-      uploadRelease.value,
-      uploadFile.value,
-      (pct) => { uploadProgress.value = pct; },
-    );
+    await uploadSourceMap(projectStore.currentId, uploadRelease.value, uploadFile.value, (pct) => {
+      uploadProgress.value = pct;
+    });
     ElMessage.success('上传成功');
     uploadVisible.value = false;
     uploadRelease.value = '';
@@ -88,22 +99,34 @@ onMounted(async () => {
   fetchList();
 });
 
-watch(() => projectStore.currentId, () => { page.value = 1; fetchList(); });
+watch(
+  () => projectStore.currentId,
+  () => {
+    page.value = 1;
+    fetchList();
+  }
+);
 </script>
 
 <template>
   <div>
     <el-card shadow="never">
       <template #header>
-        <div style="display:flex;justify-content:space-between;align-items:center">
+        <div style="display: flex; justify-content: space-between; align-items: center">
           <span>Source Map 管理</span>
           <el-button type="primary" @click="uploadVisible = true">上传 Source Map</el-button>
         </div>
       </template>
 
-      <el-form inline style="margin-bottom:12px">
+      <el-form inline style="margin-bottom: 12px">
         <el-form-item label="Release">
-          <el-input v-model="releaseFilter" placeholder="过滤版本号" clearable style="width:200px" @change="fetchList" />
+          <el-input
+            v-model="releaseFilter"
+            placeholder="过滤版本号"
+            clearable
+            style="width: 200px"
+            @change="fetchList"
+          />
         </el-form-item>
         <el-form-item>
           <el-button @click="fetchList">查询</el-button>
@@ -119,11 +142,15 @@ watch(() => projectStore.currentId, () => { page.value = 1; fetchList(); });
         </el-table-column>
         <el-table-column label="Hash" width="150">
           <template #default="{ row }">
-            <span style="font-family:monospace;font-size:12px">{{ row.content_hash?.slice(0, 12) ?? '-' }}</span>
+            <span style="font-family: monospace; font-size: 12px">{{
+              row.content_hash?.slice(0, 12) ?? '-'
+            }}</span>
           </template>
         </el-table-column>
         <el-table-column label="上传时间" width="170">
-          <template #default="{ row }">{{ row.uploaded_at?.slice(0, 19).replace('T', ' ') }}</template>
+          <template #default="{ row }">{{
+            row.uploaded_at?.slice(0, 19).replace('T', ' ')
+          }}</template>
         </el-table-column>
         <el-table-column label="操作" width="80" fixed="right">
           <template #default="{ row }">
@@ -132,7 +159,7 @@ watch(() => projectStore.currentId, () => { page.value = 1; fetchList(); });
         </el-table-column>
       </el-table>
 
-      <div style="margin-top:12px;text-align:right">
+      <div style="margin-top: 12px; text-align: right">
         <el-pagination
           v-model:current-page="page"
           :page-size="pageSize"
@@ -144,7 +171,15 @@ watch(() => projectStore.currentId, () => { page.value = 1; fetchList(); });
     </el-card>
 
     <!-- 上传对话框 -->
-    <el-dialog v-model="uploadVisible" title="上传 Source Map" width="480px">
+    <el-dialog
+      v-model="uploadVisible"
+      title="上传 Source Map"
+      width="480px"
+      @close="
+        uploadFile = null;
+        uploadRelease = '';
+      "
+    >
       <el-form label-width="100px">
         <el-form-item label="Release 版本" required>
           <el-input v-model="uploadRelease" placeholder="例如: v1.2.3 或 git commit hash" />
@@ -155,6 +190,7 @@ watch(() => projectStore.currentId, () => { page.value = 1; fetchList(); });
             :limit="1"
             accept=".map"
             :on-change="onFileChange"
+            :on-remove="onFileRemove"
           >
             <el-button>选择 .map 文件</el-button>
             <template #tip>
@@ -163,7 +199,7 @@ watch(() => projectStore.currentId, () => { page.value = 1; fetchList(); });
           </el-upload>
         </el-form-item>
         <el-form-item v-if="uploading" label="上传进度">
-          <el-progress :percentage="uploadProgress" style="width:100%" />
+          <el-progress :percentage="uploadProgress" style="width: 100%" />
         </el-form-item>
       </el-form>
       <template #footer>

@@ -106,10 +106,14 @@ async function saveGroup() {
 }
 
 async function handleDelete(row: Group) {
-  await ElMessageBox.confirm(`确认删除分组「${row.name}」？`, '确认', { type: 'warning' });
-  await deleteGroup(row.id);
-  ElMessage.success('已删除');
-  fetchGroups();
+  try {
+    await ElMessageBox.confirm(`确认删除分组「${row.name}」？`, '确认', { type: 'warning' });
+    await deleteGroup(row.id);
+    ElMessage.success('已删除');
+    fetchGroups();
+  } catch {
+    // 用户取消或请求失败
+  }
 }
 
 function ownerName(ownerId: number) {

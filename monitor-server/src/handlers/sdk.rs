@@ -55,7 +55,7 @@ pub async fn collect(
         .one(db)
         .await?
         .ok_or(AppError::Unauthorized)?;
-    if project.app_key != app_key {
+    if !constant_time_eq(project.app_key.as_bytes(), app_key.as_bytes()) {
         return Err(AppError::Unauthorized);
     }
 
@@ -70,6 +70,18 @@ fn header_str(headers: &HeaderMap, name: &str) -> AppResult<String> {
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string())
         .ok_or_else(|| AppError::BadRequest(format!("missing header: {name}")))
+}
+
+/// 恒定时间比较，防止时序攻击。
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut result = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        result |= x ^ y;
+    }
+    result == 0
 }
 
 /// 按 type 递归分发。
@@ -118,15 +130,8 @@ fn dispatch<'a>(
             "batch" => {
                 if let Some(arr) = data.as_array() {
                     for item in arr {
-                        dispatch(
-                            db,
-                            project,
-                            item.clone(),
-                            Some(context.clone()),
-                            alert_tx,
-                            cfg,
-                        )
-                        .await?;
+                        dispatch(db, project, item.clone(), Some(context.clone()), alert_tx, cfg)
+                            .await?;
                     }
                 }
             }
@@ -250,8 +255,22 @@ async fn maybe_auto_analyze(
         .await
         .unwrap_or(0);
 
+    // 触发自动分析：首次出现该 fingerprint（total=1），或短时间内爆发（>50次/小时）
     if total_same_fp > 1 && recent_same_fp <= 50 {
         return;
+    }
+    // 避免短时间内重复分析同一 fingerprint：若近期已经分析过则跳过
+    if total_same_fp > 1 {
+        let analyzed = models::JsError::find()
+            .filter(models::js_error::Column::ProjectId.eq(error.project_id))
+            .filter(models::js_error::Column::Fingerprint.eq(fp))
+            .filter(models::js_error::Column::IsAiAnalyzed.eq(true))
+            .count(db)
+            .await
+            .unwrap_or(0);
+        if analyzed > 0 {
+            return;
+        }
     }
 
     let db_clone = db.clone();
@@ -340,4 +359,150 @@ async fn save_performance(
     };
     active.insert(db).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_constant_time_eq_equal() {
+        assert!(constant_time_eq(b"hello", b"hello"));
+    }
+
+    #[test]
+    fn test_constant_time_eq_not_equal() {
+        assert!(!constant_time_eq(b"hello", b"world"));
+    }
+
+    #[test]
+    fn test_constant_time_eq_different_length() {
+        assert!(!constant_time_eq(b"abc", b"abcd"));
+    }
+
+    #[test]
+    fn test_constant_time_eq_empty() {
+        assert!(constant_time_eq(b"", b""));
+    }
+
+    #[test]
+    fn test_extract_context_from_data() {
+        let data = json!({"__context": {"browser": "Chrome"}});
+        let payload = json!({"type": "error"});
+        let ctx = extract_context(&data, &payload, None);
+        assert_eq!(ctx["browser"], "Chrome");
+    }
+
+    #[test]
+    fn test_extract_context_from_payload() {
+        let data = json!({"message": "err"});
+        let payload = json!({"type": "error", "context": {"os": "Windows"}});
+        let ctx = extract_context(&data, &payload, None);
+        assert_eq!(ctx["os"], "Windows");
+    }
+
+    #[test]
+    fn test_extract_context_inherited() {
+        let data = json!({"message": "err"});
+        let payload = json!({"type": "error"});
+        let inherited = json!({"language": "zh-CN"});
+        let ctx = extract_context(&data, &payload, Some(&inherited));
+        assert_eq!(ctx["language"], "zh-CN");
+    }
+
+    #[test]
+    fn test_extract_context_data_takes_priority() {
+        let data = json!({"__context": {"browser": "Firefox"}});
+        let payload = json!({"context": {"browser": "Chrome"}});
+        let ctx = extract_context(&data, &payload, None);
+        assert_eq!(ctx["browser"], "Firefox");
+    }
+
+    #[test]
+    fn test_extract_context_null() {
+        let data = json!({"message": "err"});
+        let payload = json!({"type": "error"});
+        let ctx = extract_context(&data, &payload, None);
+        assert_eq!(ctx, Value::Null);
+    }
+
+    #[test]
+    fn test_ctx_str_found() {
+        let ctx = json!({"browser": "Chrome"});
+        assert_eq!(ctx_str(&ctx, "browser"), Some("Chrome".into()));
+    }
+
+    #[test]
+    fn test_ctx_str_missing() {
+        let ctx = json!({"browser": "Chrome"});
+        assert_eq!(ctx_str(&ctx, "os"), None);
+    }
+
+    #[test]
+    fn test_data_str_found() {
+        let data = json!({"message": "error msg"});
+        assert_eq!(data_str(&data, "message"), Some("error msg".into()));
+    }
+
+    #[test]
+    fn test_data_str_missing() {
+        let data = json!({"message": "err"});
+        assert_eq!(data_str(&data, "stack"), None);
+    }
+
+    #[test]
+    fn test_data_i32_found() {
+        let data = json!({"line": 42});
+        assert_eq!(data_i32(&data, "line"), Some(42));
+    }
+
+    #[test]
+    fn test_data_i32_missing() {
+        let data = json!({});
+        assert_eq!(data_i32(&data, "line"), None);
+    }
+
+    #[test]
+    fn test_data_i64_found() {
+        let data = json!({"resource_size": 1024i64});
+        assert_eq!(data_i64(&data, "resource_size"), Some(1024));
+    }
+
+    #[test]
+    fn test_data_i64_missing() {
+        let data = json!({});
+        assert_eq!(data_i64(&data, "resource_size"), None);
+    }
+
+    #[test]
+    fn test_header_str_missing() {
+        let headers = HeaderMap::new();
+        let result = header_str(&headers, "x-app-id");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_header_str_present() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-app-id", "test-id".parse().unwrap());
+        let result = header_str(&headers, "x-app-id");
+        assert_eq!(result.unwrap(), "test-id");
+    }
+
+    #[test]
+    fn test_collect_payload_deserialize() {
+        let json = r#"{"type":"error","data":{"message":"test"},"context":{"browser":"Chrome"}}"#;
+        let payload: CollectPayload = serde_json::from_str(json).unwrap();
+        assert_eq!(payload.type_, "error");
+        assert_eq!(payload.data["message"], "test");
+        assert!(payload.context.is_some());
+    }
+
+    #[test]
+    fn test_collect_payload_without_context() {
+        let json = r#"{"type":"track","data":{"event":"click"}}"#;
+        let payload: CollectPayload = serde_json::from_str(json).unwrap();
+        assert_eq!(payload.type_, "track");
+        assert!(payload.context.is_none());
+    }
 }

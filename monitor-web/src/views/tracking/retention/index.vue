@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, nextTick } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useProjectStore } from '@/stores/project';
 import {
-  listRetentions, createRetention, analyzeRetention,
+  listRetentions,
+  createRetention,
+  analyzeRetention,
   listTrackEvents,
-  type TrackRetentionConfig, type RetentionTableRow,
+  type TrackRetentionConfig,
+  type RetentionTableRow,
 } from '@/api/tracking';
 import { ElMessage } from 'element-plus';
 import * as echarts from 'echarts/core';
@@ -77,20 +80,40 @@ function renderChart() {
   if (!chartRef.value || !avgRetention.value.length) return;
   if (!chart) chart = echarts.init(chartRef.value);
 
-  const days = avgRetention.value.map((_, i) => retentionType.value === 'week' ? `Week ${i + 1}` : `Day ${i + 1}`);
-  chart.setOption({
-    tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: days },
-    yAxis: { type: 'value', min: 0, max: 1, axisLabel: { formatter: (v: number) => `${(v * 100).toFixed(0)}%` } },
-    series: [{
-      type: 'line',
-      data: avgRetention.value,
-      smooth: true,
-      areaStyle: { opacity: 0.2 },
-      label: { show: true, formatter: (p: { value: number }) => `${(p.value * 100).toFixed(1)}%` },
-    }],
-  });
+  const days = avgRetention.value.map((_, i) =>
+    retentionType.value === 'week' ? `Week ${i + 1}` : `Day ${i + 1}`
+  );
+  chart.setOption(
+    {
+      tooltip: { trigger: 'axis' },
+      xAxis: { type: 'category', data: days },
+      yAxis: {
+        type: 'value',
+        min: 0,
+        max: 1,
+        axisLabel: { formatter: (v: number) => `${(v * 100).toFixed(0)}%` },
+      },
+      series: [
+        {
+          type: 'line',
+          data: avgRetention.value,
+          smooth: true,
+          areaStyle: { opacity: 0.2 },
+          label: {
+            show: true,
+            formatter: (p: { value: number }) => `${(p.value * 100).toFixed(1)}%`,
+          },
+        },
+      ],
+    },
+    true
+  );
 }
+
+onUnmounted(() => {
+  chart?.dispose();
+  chart = null;
+});
 
 function heatColor(rate: number): string {
   if (rate >= 0.5) return '#1a5c1a';
@@ -134,7 +157,9 @@ async function saveRetention() {
 
 const tableColumns = computed(() => {
   if (!tableData.value.length) return [];
-  const keys = Object.keys(tableData.value[0]).filter((k) => k.startsWith('day_') || k.startsWith('week_'));
+  const keys = Object.keys(tableData.value[0]).filter(
+    (k) => k.startsWith('day_') || k.startsWith('week_')
+  );
   return keys;
 });
 
@@ -144,16 +169,22 @@ onMounted(async () => {
   fetchEventOptions();
 });
 
-watch(() => projectStore.currentId, () => { fetchConfigs(); fetchEventOptions(); });
+watch(
+  () => projectStore.currentId,
+  () => {
+    fetchConfigs();
+    fetchEventOptions();
+  }
+);
 </script>
 
 <template>
-  <div style="display:flex;gap:16px">
+  <div style="display: flex; gap: 16px">
     <!-- 左侧：留存配置列表 -->
-    <div style="width:280px;flex-shrink:0">
+    <div style="width: 280px; flex-shrink: 0">
       <el-card shadow="never">
         <template #header>
-          <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="display: flex; justify-content: space-between; align-items: center">
             <span>留存配置</span>
             <el-button size="small" type="primary" @click="openCreate">新建</el-button>
           </div>
@@ -168,7 +199,7 @@ watch(() => projectStore.currentId, () => { fetchConfigs(); fetchEventOptions();
           >
             <div class="retention-name">{{ c.name }}</div>
             <div class="retention-meta">
-              初始: {{ c.initial_event }}<br>
+              初始: {{ c.initial_event }}<br />
               回访: {{ c.return_event }} · {{ c.retention_days }}天
             </div>
           </div>
@@ -177,21 +208,27 @@ watch(() => projectStore.currentId, () => { fetchConfigs(); fetchEventOptions();
     </div>
 
     <!-- 右侧：分析结果 -->
-    <div style="flex:1;min-width:0">
+    <div style="flex: 1; min-width: 0">
       <el-card shadow="never">
         <template #header>
-          <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="display: flex; justify-content: space-between; align-items: center">
             <span>{{ selected ? selected.name + ' — 留存分析' : '选择左侧配置查看留存' }}</span>
-            <div v-if="selected" style="display:flex;align-items:center;gap:8px">
-              <el-select v-model="retentionType" style="width:100px" @change="doAnalyze(selected!)">
+            <div v-if="selected" style="display: flex; align-items: center; gap: 8px">
+              <el-select
+                v-model="retentionType"
+                style="width: 100px"
+                @change="doAnalyze(selected!)"
+              >
                 <el-option label="按天" value="day" />
                 <el-option label="按周" value="week" />
               </el-select>
-              <el-select v-model="analyzeDays" style="width:120px" @change="doAnalyze(selected!)">
+              <el-select v-model="analyzeDays" style="width: 120px" @change="doAnalyze(selected!)">
                 <el-option label="近 14 天" :value="14" />
                 <el-option label="近 30 天" :value="30" />
               </el-select>
-              <el-button type="primary" :loading="analyzeLoading" @click="doAnalyze(selected!)">重新分析</el-button>
+              <el-button type="primary" :loading="analyzeLoading" @click="doAnalyze(selected!)"
+                >重新分析</el-button
+              >
             </div>
           </div>
         </template>
@@ -200,7 +237,7 @@ watch(() => projectStore.currentId, () => { fetchConfigs(); fetchEventOptions();
         <div v-else v-loading="analyzeLoading">
           <div v-if="tableData.length">
             <!-- 平均留存曲线 -->
-            <div ref="chartRef" style="width:100%;height:280px;margin-bottom:16px" />
+            <div ref="chartRef" style="width: 100%; height: 280px; margin-bottom: 16px" />
 
             <!-- 热力矩阵表 -->
             <el-table :data="tableData" border size="small" max-height="400">
@@ -209,11 +246,16 @@ watch(() => projectStore.currentId, () => { fetchConfigs(); fetchEventOptions();
               <el-table-column
                 v-for="col in tableColumns"
                 :key="col"
-                :label="col.startsWith('week_') ? col.replace('week_', 'Week ') : col.replace('day_', 'Day ')"
+                :label="
+                  col.startsWith('week_')
+                    ? col.replace('week_', 'Week ')
+                    : col.replace('day_', 'Day ')
+                "
                 width="70"
               >
                 <template #default="{ row }">
                   <div
+                    v-if="row[col] != null"
                     :style="{
                       backgroundColor: heatColor(row[col] as number),
                       color: (row[col] as number) > 0.2 ? '#fff' : '#333',
@@ -225,6 +267,7 @@ watch(() => projectStore.currentId, () => { fetchConfigs(); fetchEventOptions();
                   >
                     {{ ((row[col] as number) * 100).toFixed(1) }}%
                   </div>
+                  <span v-else style="color: #999">-</span>
                 </template>
               </el-table-column>
             </el-table>
@@ -241,12 +284,24 @@ watch(() => projectStore.currentId, () => { fetchConfigs(); fetchEventOptions();
           <el-input v-model="formName" placeholder="例如：新用户 7 日留存" />
         </el-form-item>
         <el-form-item label="初始事件" required>
-          <el-select v-model="formInitial" filterable allow-create placeholder="选择或输入事件名" style="width:100%">
+          <el-select
+            v-model="formInitial"
+            filterable
+            allow-create
+            placeholder="选择或输入事件名"
+            style="width: 100%"
+          >
             <el-option v-for="ev in eventOptions" :key="ev" :label="ev" :value="ev" />
           </el-select>
         </el-form-item>
         <el-form-item label="回访事件" required>
-          <el-select v-model="formReturn" filterable allow-create placeholder="选择或输入事件名" style="width:100%">
+          <el-select
+            v-model="formReturn"
+            filterable
+            allow-create
+            placeholder="选择或输入事件名"
+            style="width: 100%"
+          >
             <el-option v-for="ev in eventOptions" :key="ev" :label="ev" :value="ev" />
           </el-select>
         </el-form-item>
@@ -271,8 +326,20 @@ watch(() => projectStore.currentId, () => { fetchConfigs(); fetchEventOptions();
   border: 1px solid transparent;
   transition: all 0.2s;
 }
-.retention-item:hover { background: #f5f7fa; }
-.retention-item.active { background: #ecf5ff; border-color: #b3d8ff; }
-.retention-name { font-weight: 500; margin-bottom: 4px; }
-.retention-meta { font-size: 12px; color: #999; line-height: 1.5; }
+.retention-item:hover {
+  background: #f5f7fa;
+}
+.retention-item.active {
+  background: #ecf5ff;
+  border-color: #b3d8ff;
+}
+.retention-name {
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+.retention-meta {
+  font-size: 12px;
+  color: #999;
+  line-height: 1.5;
+}
 </style>

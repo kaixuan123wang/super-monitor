@@ -3,9 +3,13 @@
  * Phase 5 实现。
  */
 
+import type { SanitizeConfig } from '../types';
+import { sanitizeUrl } from '../core/utils';
+
 export interface ExposureOptions {
   track: (event: string, properties: Record<string, unknown>) => void;
   threshold?: number;
+  sanitize?: SanitizeConfig;
 }
 
 const DEFAULT_EVENT = '$element_exposure';
@@ -20,7 +24,7 @@ export function installExposurePlugin(options: ExposureOptions): () => void {
     return () => undefined;
   }
 
-  const { track, threshold = DEFAULT_THRESHOLD } = options;
+  const { track, threshold = DEFAULT_THRESHOLD, sanitize } = options;
   const observed = new WeakSet<Element>();
   const triggered = new WeakSet<Element>();
   const visible = new WeakSet<Element>();
@@ -30,7 +34,7 @@ export function installExposurePlugin(options: ExposureOptions): () => void {
       for (const entry of entries) {
         const el = entry.target;
         const mode = (el.getAttribute('data-track-mode') || 'once').toLowerCase();
-        const shouldTrack = entry.isIntersecting && entry.intersectionRatio >= threshold;
+        const shouldTrack = entry.isIntersecting;
 
         if (!shouldTrack) {
           visible.delete(el);
@@ -48,7 +52,7 @@ export function installExposurePlugin(options: ExposureOptions): () => void {
 
         visible.add(el);
         triggered.add(el);
-        fireExposure(track, el, entry.intersectionRatio);
+        fireExposure(track, el, entry.intersectionRatio, sanitize);
 
         if (mode !== 'always') {
           observer.unobserve(el);
@@ -108,7 +112,8 @@ function isExposureElement(el: Element): boolean {
 function fireExposure(
   track: ExposureOptions['track'],
   el: Element,
-  exposureRatio: number
+  exposureRatio: number,
+  sanitize?: SanitizeConfig
 ): void {
   const event = el.getAttribute('data-track-event') || DEFAULT_EVENT;
   const customAttrs = parseAttrs(el.getAttribute('data-track-attrs'));
@@ -120,7 +125,7 @@ function fireExposure(
     $element_type: (el as HTMLInputElement).type || el.tagName.toLowerCase(),
     $element_content: getTextContent(el),
     $element_path: getElementPath(el),
-    $page_url: location.href,
+    $page_url: sanitizeUrl(location.href, sanitize?.sensitiveQueryKeys),
     $viewport_width: window.innerWidth,
     $viewport_height: window.innerHeight,
     $exposure_ratio: Math.round(exposureRatio * 100) / 100,

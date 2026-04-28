@@ -18,9 +18,23 @@ impl MigrationTrait for Migration {
                             .auto_increment()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(Users::Username).string_len(50).not_null().unique_key())
-                    .col(ColumnDef::new(Users::Email).string_len(100).not_null().unique_key())
-                    .col(ColumnDef::new(Users::PasswordHash).string_len(255).not_null())
+                    .col(
+                        ColumnDef::new(Users::Username)
+                            .string_len(50)
+                            .not_null()
+                            .unique_key(),
+                    )
+                    .col(
+                        ColumnDef::new(Users::Email)
+                            .string_len(100)
+                            .not_null()
+                            .unique_key(),
+                    )
+                    .col(
+                        ColumnDef::new(Users::PasswordHash)
+                            .string_len(255)
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(Users::Role)
                             .string_len(20)
@@ -29,7 +43,11 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(Users::GroupId).integer().null())
                     .col(ColumnDef::new(Users::Avatar).string_len(255).null())
-                    .col(ColumnDef::new(Users::LastLoginAt).timestamp_with_time_zone().null())
+                    .col(
+                        ColumnDef::new(Users::LastLoginAt)
+                            .timestamp_with_time_zone()
+                            .null(),
+                    )
                     .col(
                         ColumnDef::new(Users::CreatedAt)
                             .timestamp_with_time_zone()

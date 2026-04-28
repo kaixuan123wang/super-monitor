@@ -5,7 +5,7 @@
 
 use axum::response::sse::{Event, KeepAlive};
 use axum::{
-    extract::{Query, State},
+    extract::{Extension, Query, State},
     response::Sse,
     Json,
 };
@@ -21,8 +21,10 @@ use std::convert::Infallible;
 use std::time::Duration as StdDuration;
 
 use crate::error::{AppError, AppResult};
+use crate::middleware::auth::{check_project_access, CurrentUser};
 use crate::models;
 use crate::router::AppState;
+use crate::utils::validate_sse_token;
 
 // ── Query params ──────────────────────────────────────────────────────────────
 
@@ -31,6 +33,8 @@ pub struct OverviewQuery {
     pub project_id: i32,
     #[serde(default = "default_days")]
     pub days: i64,
+    /// SSE 短生命周期 token（避免将 access_token 泄漏到 URL）
+    pub token: Option<String>,
 }
 
 fn default_days() -> i64 {
@@ -41,10 +45,13 @@ fn default_days() -> i64 {
 
 pub async fn overview(
     State(state): State<AppState>,
+    Extension(current_user): Extension<CurrentUser>,
     Query(q): Query<OverviewQuery>,
 ) -> AppResult<Json<Value>> {
     let db = get_db(&state)?;
-    let since = Utc::now() - Duration::days(q.days);
+    check_project_access(db, &current_user, q.project_id).await?;
+    let days = q.days.clamp(1, 90);
+    let since = Utc::now() - Duration::days(days);
     let since_fixed = since.with_timezone(&chrono::FixedOffset::east_opt(0).unwrap());
 
     // 总错误数
@@ -62,7 +69,7 @@ pub async fn overview(
         .await?;
 
     // 错误趋势（最近 days 天，每天一个数据点）
-    let error_trend = build_error_trend(db, q.project_id, q.days).await?;
+    let error_trend = build_error_trend(db, q.project_id, days).await?;
 
     // 浏览器分布
     let browser_distribution = build_browser_distribution(db, q.project_id, since_fixed).await?;
@@ -130,80 +137,84 @@ async fn build_error_trend(
     Ok(trend)
 }
 
-/// 浏览器分布（取前 10）。
+/// 浏览器分布（取前 10）— 使用 SQL GROUP BY 聚合，避免全表加载。
 async fn build_browser_distribution(
     db: &DatabaseConnection,
     project_id: i32,
     since: chrono::DateTime<chrono::FixedOffset>,
 ) -> AppResult<Vec<Value>> {
-    let rows = models::JsError::find()
-        .filter(models::js_error::Column::ProjectId.eq(project_id))
-        .filter(models::js_error::Column::CreatedAt.gte(since))
-        .all(db)
+    use sea_orm::{ConnectionTrait, Statement};
+    let sql = "SELECT COALESCE(browser, 'Unknown') AS name, COUNT(*) AS cnt \
+         FROM js_errors WHERE project_id = $1 AND created_at >= $2 \
+         GROUP BY browser ORDER BY cnt DESC LIMIT 10";
+    let rows = db
+        .query_all(Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Postgres,
+            sql,
+            [project_id.into(), since.into()],
+        ))
         .await?;
-
-    let mut map: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
-    for row in &rows {
-        let key = row.browser.clone().unwrap_or_else(|| "Unknown".into());
-        *map.entry(key).or_default() += 1;
-    }
-    let mut result: Vec<(String, u64)> = map.into_iter().collect();
-    result.sort_by(|a, b| b.1.cmp(&a.1));
-    result.truncate(10);
-    Ok(result
+    Ok(rows
         .into_iter()
-        .map(|(name, value)| json!({ "name": name, "value": value }))
+        .map(|row| {
+            let name: String = row.try_get("", "name").unwrap_or_else(|_| "Unknown".into());
+            let cnt: i64 = row.try_get("", "cnt").unwrap_or(0);
+            json!({ "name": name, "value": cnt })
+        })
         .collect())
 }
 
-/// OS 分布（取前 10）。
+/// OS 分布（取前 10）— 使用 SQL GROUP BY 聚合。
 async fn build_os_distribution(
     db: &DatabaseConnection,
     project_id: i32,
     since: chrono::DateTime<chrono::FixedOffset>,
 ) -> AppResult<Vec<Value>> {
-    let rows = models::JsError::find()
-        .filter(models::js_error::Column::ProjectId.eq(project_id))
-        .filter(models::js_error::Column::CreatedAt.gte(since))
-        .all(db)
+    use sea_orm::{ConnectionTrait, Statement};
+    let sql = "SELECT COALESCE(os, 'Unknown') AS name, COUNT(*) AS cnt \
+         FROM js_errors WHERE project_id = $1 AND created_at >= $2 \
+         GROUP BY os ORDER BY cnt DESC LIMIT 10";
+    let rows = db
+        .query_all(Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Postgres,
+            sql,
+            [project_id.into(), since.into()],
+        ))
         .await?;
-
-    let mut map: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
-    for row in &rows {
-        let key = row.os.clone().unwrap_or_else(|| "Unknown".into());
-        *map.entry(key).or_default() += 1;
-    }
-    let mut result: Vec<(String, u64)> = map.into_iter().collect();
-    result.sort_by(|a, b| b.1.cmp(&a.1));
-    result.truncate(10);
-    Ok(result
+    Ok(rows
         .into_iter()
-        .map(|(name, value)| json!({ "name": name, "value": value }))
+        .map(|row| {
+            let name: String = row.try_get("", "name").unwrap_or_else(|_| "Unknown".into());
+            let cnt: i64 = row.try_get("", "cnt").unwrap_or(0);
+            json!({ "name": name, "value": cnt })
+        })
         .collect())
 }
 
-/// 设备类型分布。
+/// 设备类型分布 — 使用 SQL GROUP BY 聚合。
 async fn build_device_distribution(
     db: &DatabaseConnection,
     project_id: i32,
     since: chrono::DateTime<chrono::FixedOffset>,
 ) -> AppResult<Vec<Value>> {
-    let rows = models::JsError::find()
-        .filter(models::js_error::Column::ProjectId.eq(project_id))
-        .filter(models::js_error::Column::CreatedAt.gte(since))
-        .all(db)
+    use sea_orm::{ConnectionTrait, Statement};
+    let sql = "SELECT COALESCE(device_type, 'desktop') AS name, COUNT(*) AS cnt \
+         FROM js_errors WHERE project_id = $1 AND created_at >= $2 \
+         GROUP BY device_type ORDER BY cnt DESC";
+    let rows = db
+        .query_all(Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Postgres,
+            sql,
+            [project_id.into(), since.into()],
+        ))
         .await?;
-
-    let mut map: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
-    for row in &rows {
-        let key = row.device_type.clone().unwrap_or_else(|| "desktop".into());
-        *map.entry(key).or_default() += 1;
-    }
-    let mut result: Vec<(String, u64)> = map.into_iter().collect();
-    result.sort_by(|a, b| b.1.cmp(&a.1));
-    Ok(result
+    Ok(rows
         .into_iter()
-        .map(|(name, value)| json!({ "name": name, "value": value }))
+        .map(|row| {
+            let name: String = row.try_get("", "name").unwrap_or_else(|_| "desktop".into());
+            let cnt: i64 = row.try_get("", "cnt").unwrap_or(0);
+            json!({ "name": name, "value": cnt })
+        })
         .collect())
 }
 
@@ -273,10 +284,26 @@ async fn build_avg_performance(
         }
     };
 
+    let avg_decimal = |f: &dyn Fn(
+        &models::performance_datum::Model,
+    ) -> Option<sea_orm::prelude::Decimal>|
+     -> Option<f64> {
+        let vals: Vec<f64> = rows
+            .iter()
+            .filter_map(|r| f(r).and_then(|d| d.to_string().parse::<f64>().ok()))
+            .collect();
+        if vals.is_empty() {
+            None
+        } else {
+            Some(vals.iter().sum::<f64>() / vals.len() as f64)
+        }
+    };
+
     Ok(json!({
         "fp":   avg(&|r| r.fp),
         "fcp":  avg(&|r| r.fcp),
         "lcp":  avg(&|r| r.lcp),
+        "cls":  avg_decimal(&|r| r.cls),
         "ttfb": avg(&|r| r.ttfb),
     }))
 }
@@ -294,7 +321,13 @@ struct SseState {
 pub async fn realtime(
     State(state): State<AppState>,
     Query(q): Query<OverviewQuery>,
-) -> Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>> {
+) -> Result<Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>, AppError> {
+    // 验证 SSE 短生命周期 token
+    let current_user =
+        validate_sse_token(&state, q.token.as_deref().ok_or(AppError::Unauthorized)?).await?;
+    let db = get_db(&state)?;
+    check_project_access(db, &current_user, q.project_id).await?;
+
     let alert_rx = state.alert_tx.subscribe();
     let init_state = SseState {
         db: state.db.clone(),
@@ -364,9 +397,6 @@ pub async fn realtime(
                                 })
                                 .to_string(),
                             );
-                            if errors.len() > 1 {
-                                s.last_error_id = errors[0].id;
-                            }
                             return Some((Ok(event), s));
                         }
                         _ => {}
@@ -379,7 +409,7 @@ pub async fn realtime(
         }
     });
 
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
 
 async fn fetch_latest_error_id(
@@ -416,4 +446,30 @@ fn get_db(state: &AppState) -> AppResult<&DatabaseConnection> {
         .db
         .as_ref()
         .ok_or_else(|| AppError::Internal("database not connected".into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_overview_query_defaults() {
+        let q: OverviewQuery = serde_json::from_str(r#"{"project_id":1}"#).unwrap();
+        assert_eq!(q.project_id, 1);
+        assert_eq!(q.days, 7);
+        assert!(q.token.is_none());
+    }
+
+    #[test]
+    fn test_overview_query_custom() {
+        let q: OverviewQuery =
+            serde_json::from_str(r#"{"project_id":1,"days":30,"token":"abc123"}"#).unwrap();
+        assert_eq!(q.days, 30);
+        assert_eq!(q.token.as_deref(), Some("abc123"));
+    }
+
+    #[test]
+    fn test_default_days() {
+        assert_eq!(default_days(), 7);
+    }
 }

@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue';
+import { ref, onMounted, onUnmounted, watch } from 'vue';
 import { useProjectStore } from '@/stores/project';
 import { listAnalyses, triggerAnalysis, type AiAnalysis } from '@/api/ai';
 import { listErrors, type JsErrorRow } from '@/api/error';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { ElMessage } from 'element-plus';
+import { Check } from '@element-plus/icons-vue';
 
 const projectStore = useProjectStore();
 
@@ -21,11 +22,17 @@ const triggerLoading = ref(false);
 const detailVisible = ref(false);
 const selected = ref<AiAnalysis | null>(null);
 
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
 async function fetchList() {
   if (!projectStore.currentId) return;
   loading.value = true;
   try {
-    const res = await listAnalyses({ project_id: projectStore.currentId, page: page.value, page_size: pageSize.value });
+    const res = await listAnalyses({
+      project_id: projectStore.currentId,
+      page: page.value,
+      page_size: pageSize.value,
+    });
     list.value = res.data?.list ?? [];
     total.value = res.data?.total ?? 0;
   } finally {
@@ -53,7 +60,7 @@ async function doTrigger() {
   try {
     await triggerAnalysis(selectedErrorId.value);
     ElMessage.success('AI 分析已触发，请稍后刷新查看结果');
-    setTimeout(() => fetchList(), 3000);
+    refreshTimer = setTimeout(() => fetchList(), 3000);
   } finally {
     triggerLoading.value = false;
   }
@@ -89,17 +96,24 @@ onMounted(async () => {
   fetchErrors();
 });
 
-watch(() => projectStore.currentId, () => {
-  page.value = 1;
-  fetchList();
-  fetchErrors();
+watch(
+  () => projectStore.currentId,
+  () => {
+    page.value = 1;
+    fetchList();
+    fetchErrors();
+  }
+);
+
+onUnmounted(() => {
+  if (refreshTimer) clearTimeout(refreshTimer);
 });
 </script>
 
 <template>
   <div class="ai-analysis-page">
     <!-- 触发区 -->
-    <el-card shadow="never" style="margin-bottom:16px">
+    <el-card shadow="never" style="margin-bottom: 16px">
       <template #header>
         <span>触发 AI 分析</span>
       </template>
@@ -110,7 +124,7 @@ watch(() => projectStore.currentId, () => {
             placeholder="从错误列表选择"
             filterable
             :loading="errorLoading"
-            style="width:400px"
+            style="width: 400px"
           >
             <el-option
               v-for="e in errorList"
@@ -133,7 +147,7 @@ watch(() => projectStore.currentId, () => {
     <el-card shadow="never">
       <template #header>
         <span>AI 分析历史</span>
-        <span style="float:right;color:#999;font-size:13px">共 {{ total }} 条</span>
+        <span style="float: right; color: #999; font-size: 13px">共 {{ total }} 条</span>
       </template>
 
       <el-table :data="list" v-loading="loading" border>
@@ -169,7 +183,9 @@ watch(() => projectStore.currentId, () => {
           </template>
         </el-table-column>
         <el-table-column label="时间" width="170">
-          <template #default="{ row }">{{ row.created_at?.slice(0, 19).replace('T', ' ') }}</template>
+          <template #default="{ row }">{{
+            row.created_at?.slice(0, 19).replace('T', ' ')
+          }}</template>
         </el-table-column>
         <el-table-column label="操作" width="80" fixed="right">
           <template #default="{ row }">
@@ -178,7 +194,7 @@ watch(() => projectStore.currentId, () => {
         </el-table-column>
       </el-table>
 
-      <div style="margin-top:12px;text-align:right">
+      <div style="margin-top: 12px; text-align: right">
         <el-pagination
           v-model:current-page="page"
           :page-size="pageSize"
@@ -192,31 +208,43 @@ watch(() => projectStore.currentId, () => {
     <!-- 详情抽屉 -->
     <el-drawer v-model="detailVisible" title="AI 分析详情" size="50%">
       <template v-if="selected">
-        <el-descriptions :column="2" border size="small" style="margin-bottom:16px">
+        <el-descriptions :column="2" border size="small" style="margin-bottom: 16px">
           <el-descriptions-item label="错误 ID">{{ selected.error_id }}</el-descriptions-item>
           <el-descriptions-item label="状态">
             <el-tag :type="statusTag(selected.status)" size="small">{{ selected.status }}</el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="严重度">P{{ selected.severity_score ?? '-' }}</el-descriptions-item>
+          <el-descriptions-item label="严重度"
+            >P{{ selected.severity_score ?? '-' }}</el-descriptions-item
+          >
           <el-descriptions-item label="置信度">
             {{ selected.confidence != null ? (selected.confidence * 100).toFixed(0) + '%' : '-' }}
           </el-descriptions-item>
-          <el-descriptions-item label="可能文件">{{ selected.probable_file ?? '-' }}</el-descriptions-item>
-          <el-descriptions-item label="可能行号">{{ selected.probable_line ?? '-' }}</el-descriptions-item>
+          <el-descriptions-item label="可能文件">{{
+            selected.probable_file ?? '-'
+          }}</el-descriptions-item>
+          <el-descriptions-item label="可能行号">{{
+            selected.probable_line ?? '-'
+          }}</el-descriptions-item>
           <el-descriptions-item label="模型">{{ selected.model_used ?? '-' }}</el-descriptions-item>
           <el-descriptions-item label="耗时">{{ selected.cost_ms ?? '-' }} ms</el-descriptions-item>
         </el-descriptions>
 
-        <div v-if="selected.tags?.length" style="margin-bottom:12px">
-          <el-tag v-for="tag in selected.tags" :key="tag" style="margin-right:6px">{{ tag }}</el-tag>
+        <div v-if="selected.tags?.length" style="margin-bottom: 12px">
+          <el-tag v-for="tag in selected.tags" :key="tag" style="margin-right: 6px">{{
+            tag
+          }}</el-tag>
         </div>
 
         <el-collapse accordion>
           <el-collapse-item title="AI 分析建议" name="suggestion">
-            <pre style="white-space:pre-wrap;font-size:13px;line-height:1.6">{{ selected.ai_suggestion || '暂无' }}</pre>
+            <pre style="white-space: pre-wrap; font-size: 13px; line-height: 1.6">{{
+              selected.ai_suggestion || '暂无'
+            }}</pre>
           </el-collapse-item>
           <el-collapse-item v-if="selected.analyzed_stack" title="Source Map 还原堆栈" name="stack">
-            <pre style="white-space:pre-wrap;font-size:12px;font-family:monospace">{{ selected.analyzed_stack }}</pre>
+            <pre style="white-space: pre-wrap; font-size: 12px; font-family: monospace">{{
+              selected.analyzed_stack
+            }}</pre>
           </el-collapse-item>
         </el-collapse>
       </template>
@@ -225,5 +253,7 @@ watch(() => projectStore.currentId, () => {
 </template>
 
 <style scoped>
-.ai-analysis-page { padding: 0; }
+.ai-analysis-page {
+  padding: 0;
+}
 </style>

@@ -2,7 +2,7 @@
 
 use axum::response::sse::{Event, KeepAlive};
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Extension, Path, Query, State},
     response::Sse,
     Json,
 };
@@ -17,8 +17,10 @@ use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 
 use crate::error::{AppError, AppResult};
+use crate::middleware::auth::{check_project_access, CurrentUser};
 use crate::models;
 use crate::router::AppState;
+use crate::utils::validate_sse_token;
 
 #[derive(Debug, Deserialize)]
 pub struct AnalysisQuery {
@@ -44,12 +46,15 @@ fn default_metric() -> String {
 
 pub async fn event_analysis(
     State(state): State<AppState>,
+    Extension(current_user): Extension<CurrentUser>,
     Query(q): Query<AnalysisQuery>,
 ) -> AppResult<Json<Value>> {
     let db = get_db(&state)?;
+    check_project_access(db, &current_user, q.project_id).await?;
 
     let event_names: Vec<&str> = q.events.split(',').map(str::trim).collect();
-    let since = (Utc::now() - Duration::days(q.days))
+    let days = q.days.clamp(1, 90);
+    let since = (Utc::now() - Duration::days(days))
         .with_timezone(&chrono::FixedOffset::east_opt(0).unwrap());
 
     let rows = models::TrackEvent::find()
@@ -66,7 +71,7 @@ pub async fn event_analysis(
         .collect();
 
     // 日期列表（升序）
-    let dates: Vec<String> = (0..q.days)
+    let dates: Vec<String> = (0..days)
         .rev()
         .map(|i| (Utc::now() - Duration::days(i)).date_naive().to_string())
         .collect();
@@ -292,17 +297,17 @@ pub struct FunnelListQuery {
 
 pub async fn list_funnels(
     State(state): State<crate::router::AppState>,
+    Extension(current_user): Extension<CurrentUser>,
     Query(q): Query<FunnelListQuery>,
 ) -> AppResult<Json<Value>> {
     let db = get_db(&state)?;
+    check_project_access(db, &current_user, q.project_id).await?;
     let items = models::TrackFunnel::find()
         .filter(models::track_funnel::Column::ProjectId.eq(q.project_id))
         .order_by_desc(models::track_funnel::Column::CreatedAt)
         .all(db)
         .await?;
-    Ok(Json(
-        json!({ "code": 0, "message": "ok", "data": { "list": items, "total": items.len() } }),
-    ))
+    Ok(Json(json!({ "code": 0, "message": "ok", "data": { "list": items, "total": items.len() } })))
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -320,9 +325,11 @@ fn default_window() -> i32 {
 
 pub async fn create_funnel(
     State(state): State<crate::router::AppState>,
+    Extension(current_user): Extension<CurrentUser>,
     Json(body): Json<CreateFunnelBody>,
 ) -> AppResult<Json<Value>> {
     let db = get_db(&state)?;
+    check_project_access(db, &current_user, body.project_id).await?;
     let am = models::track_funnel::ActiveModel {
         id: sea_orm::NotSet,
         project_id: Set(body.project_id),
@@ -330,7 +337,7 @@ pub async fn create_funnel(
         description: Set(body.description),
         steps: Set(body.steps),
         window_minutes: Set(body.window_minutes),
-        created_by: Set(None),
+        created_by: Set(Some(current_user.id)),
         created_at: Set(now_fixed()),
         updated_at: Set(now_fixed()),
     };
@@ -340,6 +347,7 @@ pub async fn create_funnel(
 
 pub async fn get_funnel(
     State(state): State<crate::router::AppState>,
+    Extension(current_user): Extension<CurrentUser>,
     Path(id): Path<i32>,
 ) -> AppResult<Json<Value>> {
     let db = get_db(&state)?;
@@ -347,6 +355,7 @@ pub async fn get_funnel(
         .one(db)
         .await?
         .ok_or(AppError::NotFound)?;
+    check_project_access(db, &current_user, row.project_id).await?;
     Ok(Json(json!({ "code": 0, "message": "ok", "data": row })))
 }
 
@@ -360,6 +369,7 @@ pub struct UpdateFunnelBody {
 
 pub async fn update_funnel(
     State(state): State<crate::router::AppState>,
+    Extension(current_user): Extension<CurrentUser>,
     Path(id): Path<i32>,
     Json(body): Json<UpdateFunnelBody>,
 ) -> AppResult<Json<Value>> {
@@ -368,6 +378,7 @@ pub async fn update_funnel(
         .one(db)
         .await?
         .ok_or(AppError::NotFound)?;
+    check_project_access(db, &current_user, row.project_id).await?;
     let mut am: models::track_funnel::ActiveModel = row.into();
     if let Some(v) = body.name {
         am.name = Set(v);
@@ -388,17 +399,17 @@ pub async fn update_funnel(
 
 pub async fn delete_funnel(
     State(state): State<crate::router::AppState>,
+    Extension(current_user): Extension<CurrentUser>,
     Path(id): Path<i32>,
 ) -> AppResult<Json<Value>> {
     let db = get_db(&state)?;
-    models::TrackFunnel::find_by_id(id)
+    let row = models::TrackFunnel::find_by_id(id)
         .one(db)
         .await?
         .ok_or(AppError::NotFound)?;
+    check_project_access(db, &current_user, row.project_id).await?;
     models::TrackFunnel::delete_by_id(id).exec(db).await?;
-    Ok(Json(
-        json!({ "code": 0, "message": "ok", "data": { "deleted": 1 } }),
-    ))
+    Ok(Json(json!({ "code": 0, "message": "ok", "data": { "deleted": 1 } })))
 }
 
 #[derive(Debug, Deserialize)]
@@ -427,6 +438,7 @@ fn funnel_time_bounds(
 
 pub async fn analyze_funnel(
     State(state): State<crate::router::AppState>,
+    Extension(current_user): Extension<CurrentUser>,
     Path(id): Path<i32>,
     Json(body): Json<FunnelAnalyzeBody>,
 ) -> AppResult<Json<Value>> {
@@ -435,6 +447,7 @@ pub async fn analyze_funnel(
         .one(db)
         .await?
         .ok_or(AppError::NotFound)?;
+    check_project_access(db, &current_user, funnel.project_id).await?;
 
     let (since, until) = funnel_time_bounds(body.time_range.as_ref());
 
@@ -609,17 +622,17 @@ pub struct RetentionListQuery {
 
 pub async fn list_retentions(
     State(state): State<crate::router::AppState>,
+    Extension(current_user): Extension<CurrentUser>,
     Query(q): Query<RetentionListQuery>,
 ) -> AppResult<Json<Value>> {
     let db = get_db(&state)?;
+    check_project_access(db, &current_user, q.project_id).await?;
     let items = models::TrackRetentionConfig::find()
         .filter(models::track_retention_config::Column::ProjectId.eq(q.project_id))
         .order_by_desc(models::track_retention_config::Column::CreatedAt)
         .all(db)
         .await?;
-    Ok(Json(
-        json!({ "code": 0, "message": "ok", "data": { "list": items, "total": items.len() } }),
-    ))
+    Ok(Json(json!({ "code": 0, "message": "ok", "data": { "list": items, "total": items.len() } })))
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -639,9 +652,11 @@ fn default_retention_days() -> i32 {
 
 pub async fn create_retention(
     State(state): State<crate::router::AppState>,
+    Extension(current_user): Extension<CurrentUser>,
     Json(body): Json<CreateRetentionBody>,
 ) -> AppResult<Json<Value>> {
     let db = get_db(&state)?;
+    check_project_access(db, &current_user, body.project_id).await?;
     let am = models::track_retention_config::ActiveModel {
         id: sea_orm::NotSet,
         project_id: Set(body.project_id),
@@ -651,7 +666,7 @@ pub async fn create_retention(
         initial_filters: Set(body.initial_filters),
         return_filters: Set(body.return_filters),
         retention_days: Set(body.retention_days),
-        created_by: Set(None),
+        created_by: Set(Some(current_user.id)),
         created_at: Set(now_fixed()),
     };
     let saved = am.insert(db).await?;
@@ -693,6 +708,7 @@ fn retention_bucket(date: NaiveDate, retention_type: &str) -> NaiveDate {
 
 pub async fn analyze_retention(
     State(state): State<crate::router::AppState>,
+    Extension(current_user): Extension<CurrentUser>,
     Path(id): Path<i32>,
     Json(body): Json<RetentionAnalyzeBody>,
 ) -> AppResult<Json<Value>> {
@@ -701,6 +717,7 @@ pub async fn analyze_retention(
         .one(db)
         .await?
         .ok_or(AppError::NotFound)?;
+    check_project_access(db, &current_user, config.project_id).await?;
 
     let retention_type = body.retention_type.as_deref().unwrap_or("day");
     let retention_days = config.retention_days as i64;
@@ -789,7 +806,7 @@ pub async fn analyze_retention(
                 .filter(|uid| {
                     return_dates
                         .get(*uid)
-                        .map_or(false, |dates| dates.contains(&target_date))
+                        .is_some_and(|dates| dates.contains(&target_date))
                 })
                 .count();
             let rate = retained as f64 / cohort_size as f64;
@@ -836,6 +853,7 @@ pub async fn analyze_retention(
 pub struct LiveEventsQuery {
     pub project_id: i32,
     pub distinct_id: Option<String>,
+    pub token: Option<String>,
 }
 
 #[derive(Clone)]
@@ -851,7 +869,12 @@ struct LiveState {
 pub async fn live_events(
     State(state): State<crate::router::AppState>,
     Query(q): Query<LiveEventsQuery>,
-) -> Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>> {
+) -> Result<Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>, AppError> {
+    let current_user =
+        validate_sse_token(&state, q.token.as_deref().ok_or(AppError::Unauthorized)?).await?;
+    let db = get_db(&state)?;
+    check_project_access(db, &current_user, q.project_id).await?;
+
     let init_state = LiveState {
         db: state.db.clone(),
         project_id: q.project_id,
@@ -988,5 +1011,196 @@ pub async fn live_events(
         }
     });
 
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{Datelike, TimeZone, Timelike};
+
+    fn mock_track_event(
+        event: &str,
+        browser: Option<&str>,
+        os: Option<&str>,
+    ) -> models::track_event::Model {
+        models::track_event::Model {
+            id: 1,
+            project_id: 1,
+            app_id: "".into(),
+            distinct_id: "".into(),
+            anonymous_id: None,
+            user_id: None,
+            is_login_id: false,
+            event: event.into(),
+            event_type: "".into(),
+            properties: None,
+            super_properties: None,
+            session_id: None,
+            event_duration: None,
+            page_url: None,
+            page_title: None,
+            referrer: None,
+            viewport: None,
+            screen_resolution: None,
+            user_agent: None,
+            browser: browser.map(|s| s.into()),
+            browser_version: None,
+            os: os.map(|s| s.into()),
+            os_version: None,
+            device_type: None,
+            language: None,
+            timezone: None,
+            sdk_version: None,
+            release: None,
+            environment: None,
+            client_time: None,
+            created_at: chrono::FixedOffset::east_opt(0)
+                .unwrap()
+                .with_ymd_and_hms(2024, 1, 1, 0, 0, 0)
+                .unwrap(),
+        }
+    }
+
+    #[test]
+    fn test_default_days() {
+        assert_eq!(default_days(), 7);
+    }
+
+    #[test]
+    fn test_default_metric() {
+        assert_eq!(default_metric(), "pv");
+    }
+
+    #[test]
+    fn test_row_date() {
+        let mut row = mock_track_event("", None, None);
+        row.created_at = chrono::FixedOffset::east_opt(0)
+            .unwrap()
+            .with_ymd_and_hms(2024, 1, 15, 10, 30, 0)
+            .unwrap();
+        assert_eq!(row_date(&row), "2024-01-15");
+    }
+
+    #[test]
+    fn test_dim_value() {
+        let mut row = mock_track_event("", None, None);
+        row.browser = Some("Chrome".into());
+        row.os = Some("macOS".into());
+        row.device_type = Some("desktop".into());
+        row.environment = Some("production".into());
+        assert_eq!(dim_value(&row, "browser"), "Chrome");
+        assert_eq!(dim_value(&row, "os"), "macOS");
+        assert_eq!(dim_value(&row, "device_type"), "desktop");
+        assert_eq!(dim_value(&row, "environment"), "production");
+        assert_eq!(dim_value(&row, "unknown"), "Unknown");
+    }
+
+    #[test]
+    fn test_parse_time_bound_rfc3339() {
+        let result = parse_time_bound(Some("2024-01-15T10:30:00+00:00"), false);
+        assert!(result.is_some());
+        let dt = result.unwrap();
+        assert_eq!(dt.day(), 15);
+        assert_eq!(dt.hour(), 10);
+    }
+
+    #[test]
+    fn test_parse_time_bound_date() {
+        let result = parse_time_bound(Some("2024-01-15"), false);
+        assert!(result.is_some());
+        let dt = result.unwrap();
+        assert_eq!(dt.day(), 15);
+        assert_eq!(dt.hour(), 0);
+    }
+
+    #[test]
+    fn test_parse_time_bound_empty() {
+        assert!(parse_time_bound(Some(""), false).is_none());
+        assert!(parse_time_bound(None, false).is_none());
+    }
+
+    #[test]
+    fn test_json_value_matches_string() {
+        assert!(json_value_matches(&json!("hello"), &json!("hello")));
+        assert!(!json_value_matches(&json!("hello"), &json!("world")));
+    }
+
+    #[test]
+    fn test_json_value_matches_number() {
+        assert!(json_value_matches(&json!(42), &json!(42)));
+        assert!(json_value_matches(&json!(42.0), &json!(42)));
+        assert!(!json_value_matches(&json!(42), &json!(43)));
+    }
+
+    #[test]
+    fn test_json_value_matches_bool() {
+        assert!(json_value_matches(&json!(true), &json!(true)));
+        assert!(!json_value_matches(&json!(true), &json!(false)));
+    }
+
+    #[test]
+    fn test_json_value_matches_null() {
+        assert!(json_value_matches(&json!(null), &json!(null)));
+        assert!(!json_value_matches(&json!("x"), &json!(null)));
+    }
+
+    #[test]
+    fn test_json_value_matches_array() {
+        assert!(json_value_matches(&json!("b"), &json!(["a", "b", "c"])));
+        assert!(!json_value_matches(&json!("d"), &json!(["a", "b", "c"])));
+    }
+
+    #[test]
+    fn test_json_lookup_found() {
+        let source = Some(json!({"name": "test", "age": 30}));
+        assert_eq!(json_lookup(&source, "name"), Some(json!("test")));
+    }
+
+    #[test]
+    fn test_json_lookup_missing() {
+        let source = Some(json!({"name": "test"}));
+        assert_eq!(json_lookup(&source, "missing"), None);
+    }
+
+    #[test]
+    fn test_event_field_value_event() {
+        let row = mock_track_event("click", Some("Chrome"), None);
+        assert_eq!(event_field_value(&row, "event"), Some(json!("click")));
+        assert_eq!(event_field_value(&row, "browser"), Some(json!("Chrome")));
+    }
+
+    #[test]
+    fn test_event_matches_filters_empty() {
+        let row = mock_track_event("click", None, None);
+        assert!(event_matches_filters(&row, None));
+        assert!(event_matches_filters(&row, Some(&json!({}))));
+    }
+
+    #[test]
+    fn test_dim_or_property_value() {
+        let row = mock_track_event("click", Some("Chrome"), None);
+        assert_eq!(dim_or_property_value(&row, "event"), "click");
+        assert_eq!(dim_or_property_value(&row, "browser"), "Chrome");
+        assert_eq!(dim_or_property_value(&row, "unknown"), "Unknown");
+    }
+
+    #[test]
+    fn test_default_window() {
+        assert_eq!(default_window(), 1440);
+    }
+
+    #[test]
+    fn test_default_retention_days() {
+        assert_eq!(default_retention_days(), 7);
+    }
+
+    #[test]
+    fn test_retention_bucket() {
+        use chrono::NaiveDate;
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        assert_eq!(retention_bucket(date, "day"), date);
+        assert_eq!(retention_bucket(date, "week"), NaiveDate::from_ymd_opt(2024, 1, 15).unwrap());
+        // month type not implemented in retention_bucket, falls through to date
+    }
 }

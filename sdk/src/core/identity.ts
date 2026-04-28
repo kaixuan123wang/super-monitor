@@ -61,11 +61,9 @@ export class Identity {
     return { originalId, distinctId: userId };
   }
 
-  /** 用户登出：重置为新匿名 ID */
+  /** 用户登出：清除登录 ID，保持匿名 ID 不变以保持用户链路连续性 */
   logout(): void {
     this.loginId = null;
     safeStorage.remove(LOGIN_STORAGE_KEY);
-    this.anonymousId = this.prefix + uuid();
-    safeStorage.set(ANON_STORAGE_KEY, this.anonymousId);
   }
 }

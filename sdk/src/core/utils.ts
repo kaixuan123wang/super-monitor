@@ -118,31 +118,49 @@ const DEFAULT_SENSITIVE_FIELDS = [
   'api_key',
   'authorization',
   'auth',
+  'phone',
+  'mobile',
+  'email',
+  'idcard',
+  'id_card',
+  'bankcard',
+  'bank_card',
+  'name',
+  'realname',
+  'real_name',
+  'address',
+  'username',
 ];
 
-const DEFAULT_SENSITIVE_QUERY_KEYS = ['token', 'auth', 'key', 'secret', 'access_token'];
+const DEFAULT_SENSITIVE_QUERY_KEYS = ['token', 'auth', 'key', 'secret', 'access_token', 'phone', 'mobile', 'email', 'idcard', 'bankcard'];
 
 const REDACTED = '[REDACTED]';
+
+function mergeSensitiveList(defaults: string[], custom?: string[]): string[] {
+  if (!custom || custom.length === 0) return defaults;
+  return Array.from(new Set([...defaults, ...custom].map((item) => item.toLowerCase())));
+}
 
 /** 递归替换对象中敏感字段的值 */
 export function sanitizeObject(
   value: unknown,
-  sensitive: string[] = DEFAULT_SENSITIVE_FIELDS,
+  sensitive?: string[],
   depth = 0
 ): unknown {
+  const sensitiveList = mergeSensitiveList(DEFAULT_SENSITIVE_FIELDS, sensitive);
   if (depth > 6) return value;
   if (value === null || value === undefined) return value;
   if (Array.isArray(value)) {
-    return value.map((v) => sanitizeObject(v, sensitive, depth + 1));
+    return value.map((v) => sanitizeObject(v, sensitiveList, depth + 1));
   }
   if (typeof value === 'object') {
     const out: Record<string, unknown> = {};
     for (const k of Object.keys(value as Record<string, unknown>)) {
       const lower = k.toLowerCase();
-      if (sensitive.some((s) => lower.includes(s))) {
+      if (sensitiveList.some((s) => lower.includes(s))) {
         out[k] = REDACTED;
       } else {
-        out[k] = sanitizeObject((value as Record<string, unknown>)[k], sensitive, depth + 1);
+        out[k] = sanitizeObject((value as Record<string, unknown>)[k], sensitiveList, depth + 1);
       }
     }
     return out;
@@ -153,17 +171,21 @@ export function sanitizeObject(
 /** 脱敏字符串形式的 body（尝试 JSON.parse 后脱敏，失败则按关键字正则替换） */
 export function sanitizeBodyString(
   body: string,
-  sensitive: string[] = DEFAULT_SENSITIVE_FIELDS,
+  sensitive?: string[],
   maxSize = 10 * 1024
 ): string {
   if (!body) return body;
-  let truncated = body.length > maxSize ? body.slice(0, maxSize) + '...[TRUNCATED]' : body;
+  const sensitiveList = mergeSensitiveList(DEFAULT_SENSITIVE_FIELDS, sensitive);
   try {
-    const parsed = JSON.parse(truncated.replace(/\.\.\.\[TRUNCATED\]$/, ''));
-    return JSON.stringify(sanitizeObject(parsed, sensitive));
+    // Try parsing the full body first, then sanitize, then truncate
+    const parsed = JSON.parse(body);
+    const sanitized = sanitizeObject(parsed, sensitiveList);
+    const result = JSON.stringify(sanitized);
+    return result.length > maxSize ? result.slice(0, maxSize) + '...[TRUNCATED]' : result;
   } catch {
-    // 非 JSON，使用正则粗糙替换
-    for (const field of sensitive) {
+    // Non-JSON: use regex-based sanitization
+    let truncated = body.length > maxSize ? body.slice(0, maxSize) + '...[TRUNCATED]' : body;
+    for (const field of sensitiveList) {
       const reg = new RegExp(`(["']?${field}["']?\\s*[:=]\\s*["']?)[^"'&,\\s}]+`, 'gi');
       truncated = truncated.replace(reg, `$1${REDACTED}`);
     }
@@ -174,15 +196,17 @@ export function sanitizeBodyString(
 /** 从 URL 中去掉敏感 query key */
 export function sanitizeUrl(
   url: string,
-  sensitiveKeys: string[] = DEFAULT_SENSITIVE_QUERY_KEYS
+  sensitiveKeys?: string[]
 ): string {
   if (!url || url.indexOf('?') === -1) return url;
+  const keyList = mergeSensitiveList(DEFAULT_SENSITIVE_QUERY_KEYS, sensitiveKeys);
   try {
     const [base, query] = url.split('?');
     const params = query.split('&').map((pair) => {
       const [k, ...rest] = pair.split('=');
       const v = rest.join('=');
-      if (sensitiveKeys.some((s) => k.toLowerCase() === s.toLowerCase())) {
+      const decodedKey = decodeURIComponent(k).toLowerCase();
+      if (keyList.some((s) => decodedKey === s)) {
         return `${k}=${REDACTED}`;
       }
       return v === undefined ? k : `${k}=${v}`;
@@ -204,37 +228,38 @@ export function parseUA(ua: string): {
   const u = ua || '';
   let browser = 'Unknown';
   let browserVersion = '';
-  if (/Edg\/([\d.]+)/.test(u)) {
+  let m: RegExpMatchArray | null;
+  if ((m = u.match(/Edg\/([\d.]+)/))) {
     browser = 'Edge';
-    browserVersion = RegExp.$1;
-  } else if (/Chrome\/([\d.]+)/.test(u) && !/OPR/.test(u)) {
+    browserVersion = m[1];
+  } else if ((m = u.match(/Chrome\/([\d.]+)/)) && !/OPR/.test(u)) {
     browser = 'Chrome';
-    browserVersion = RegExp.$1;
-  } else if (/Firefox\/([\d.]+)/.test(u)) {
+    browserVersion = m[1];
+  } else if ((m = u.match(/Firefox\/([\d.]+)/))) {
     browser = 'Firefox';
-    browserVersion = RegExp.$1;
-  } else if (/Safari\/([\d.]+)/.test(u) && /Version\/([\d.]+)/.test(u)) {
+    browserVersion = m[1];
+  } else if ((m = u.match(/Version\/([\d.]+)/)) && /Safari\//.test(u)) {
     browser = 'Safari';
-    browserVersion = RegExp.$1;
-  } else if (/MSIE ([\d.]+)/.test(u) || /Trident.*rv:([\d.]+)/.test(u)) {
+    browserVersion = m[1];
+  } else if ((m = u.match(/(?:MSIE |Trident.*rv:)([\d.]+)/))) {
     browser = 'IE';
-    browserVersion = RegExp.$1;
+    browserVersion = m[1];
   }
 
   let os = 'Unknown';
   let osVersion = '';
-  if (/Windows NT ([\d.]+)/.test(u)) {
+  if ((m = u.match(/Windows NT ([\d.]+)/))) {
     os = 'Windows';
-    osVersion = RegExp.$1;
-  } else if (/Mac OS X ([\d_\.]+)/.test(u)) {
+    osVersion = m[1];
+  } else if ((m = u.match(/Mac OS X ([\d_.]+)/))) {
     os = 'macOS';
-    osVersion = RegExp.$1.replace(/_/g, '.');
-  } else if (/Android ([\d.]+)/.test(u)) {
+    osVersion = m[1].replace(/_/g, '.');
+  } else if ((m = u.match(/Android ([\d.]+)/))) {
     os = 'Android';
-    osVersion = RegExp.$1;
-  } else if (/iPhone OS ([\d_]+)/.test(u) || /OS ([\d_]+) like Mac OS X/.test(u)) {
+    osVersion = m[1];
+  } else if ((m = u.match(/(?:iPhone OS |OS )([\d_]+) like Mac OS X/))) {
     os = 'iOS';
-    osVersion = RegExp.$1.replace(/_/g, '.');
+    osVersion = m[1].replace(/_/g, '.');
   } else if (/Linux/.test(u)) {
     os = 'Linux';
   }

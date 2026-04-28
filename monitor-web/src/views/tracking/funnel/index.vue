@@ -1,10 +1,16 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, nextTick } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useProjectStore } from '@/stores/project';
 import {
-  listFunnels, createFunnel, updateFunnel, deleteFunnel, analyzeFunnel,
+  listFunnels,
+  createFunnel,
+  updateFunnel,
+  deleteFunnel,
+  analyzeFunnel,
   listTrackEvents,
-  type TrackFunnel, type FunnelStep, type FunnelStepResult,
+  type TrackFunnel,
+  type FunnelStep,
+  type FunnelStepResult,
 } from '@/api/tracking';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import * as echarts from 'echarts/core';
@@ -25,7 +31,9 @@ const analyzeResult = ref<FunnelStepResult[]>([]);
 const overallConversion = ref(0);
 const analyzeDays = ref(7);
 const groupBy = ref('');
-const breakdown = ref<Array<{ group: string; steps: FunnelStepResult[]; overall_conversion: number }>>([]);
+const breakdown = ref<
+  Array<{ group: string; steps: FunnelStepResult[]; overall_conversion: number }>
+>([]);
 
 const chartRef = ref<HTMLDivElement>();
 let chart: echarts.ECharts | null = null;
@@ -84,21 +92,33 @@ function renderChart() {
     value: s.user_count,
   }));
 
-  chart.setOption({
-    tooltip: { trigger: 'item', formatter: '{b}: {c} 人 ({d}%)' },
-    series: [{
-      type: 'funnel',
-      left: '10%', width: '80%',
-      data,
-      label: {
-        formatter: (p: { name: string; value: number }) =>
-          `${p.name}\n${p.value} 人`,
-      },
-    }],
-  });
+  chart.setOption(
+    {
+      tooltip: { trigger: 'item', formatter: '{b}: {c} 人 ({d}%)' },
+      series: [
+        {
+          type: 'funnel',
+          left: '10%',
+          width: '80%',
+          data,
+          label: {
+            formatter: (p: { name: string; value: number }) => `${p.name}\n${p.value} 人`,
+          },
+        },
+      ],
+    },
+    true
+  );
 }
 
-const breakdownStepLabels = computed(() => analyzeResult.value.map((s) => s.display_name || s.event));
+onUnmounted(() => {
+  chart?.dispose();
+  chart = null;
+});
+
+const breakdownStepLabels = computed(() =>
+  analyzeResult.value.map((s) => s.display_name || s.event)
+);
 
 function addStep() {
   formSteps.value.push({ event: '', display_name: '' });
@@ -125,16 +145,31 @@ function openEdit(f: TrackFunnel) {
 }
 
 async function saveFunnel() {
-  if (!formName.value) { ElMessage.warning('请填写漏斗名称'); return; }
+  if (!formName.value) {
+    ElMessage.warning('请填写漏斗名称');
+    return;
+  }
   const steps = formSteps.value.filter((s) => s.event);
-  if (steps.length < 2) { ElMessage.warning('漏斗至少需要 2 个步骤'); return; }
+  if (steps.length < 2) {
+    ElMessage.warning('漏斗至少需要 2 个步骤');
+    return;
+  }
 
   saving.value = true;
   try {
     if (editingId.value) {
-      await updateFunnel(editingId.value, { name: formName.value, steps, window_minutes: formWindow.value });
+      await updateFunnel(editingId.value, {
+        name: formName.value,
+        steps,
+        window_minutes: formWindow.value,
+      });
     } else {
-      await createFunnel({ project_id: projectStore.currentId!, name: formName.value, steps, window_minutes: formWindow.value });
+      await createFunnel({
+        project_id: projectStore.currentId!,
+        name: formName.value,
+        steps,
+        window_minutes: formWindow.value,
+      });
     }
     ElMessage.success('保存成功');
     dialogVisible.value = false;
@@ -145,11 +180,18 @@ async function saveFunnel() {
 }
 
 async function handleDelete(f: TrackFunnel) {
-  await ElMessageBox.confirm(`确认删除漏斗「${f.name}」？`, '确认', { type: 'warning' });
-  await deleteFunnel(f.id);
-  ElMessage.success('已删除');
-  if (selected.value?.id === f.id) { selected.value = null; analyzeResult.value = []; }
-  fetchFunnels();
+  try {
+    await ElMessageBox.confirm(`确认删除漏斗「${f.name}」？`, '确认', { type: 'warning' });
+    await deleteFunnel(f.id);
+    ElMessage.success('已删除');
+    if (selected.value?.id === f.id) {
+      selected.value = null;
+      analyzeResult.value = [];
+    }
+    fetchFunnels();
+  } catch {
+    // 用户取消或请求失败
+  }
 }
 
 onMounted(async () => {
@@ -158,16 +200,22 @@ onMounted(async () => {
   fetchEventOptions();
 });
 
-watch(() => projectStore.currentId, () => { fetchFunnels(); fetchEventOptions(); });
+watch(
+  () => projectStore.currentId,
+  () => {
+    fetchFunnels();
+    fetchEventOptions();
+  }
+);
 </script>
 
 <template>
-  <div style="display:flex;gap:16px">
+  <div style="display: flex; gap: 16px">
     <!-- 左侧：漏斗列表 -->
-    <div style="width:280px;flex-shrink:0">
+    <div style="width: 280px; flex-shrink: 0">
       <el-card shadow="never">
         <template #header>
-          <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="display: flex; justify-content: space-between; align-items: center">
             <span>漏斗列表</span>
             <el-button size="small" type="primary" @click="openCreate">新建</el-button>
           </div>
@@ -181,10 +229,14 @@ watch(() => projectStore.currentId, () => { fetchFunnels(); fetchEventOptions();
             @click="doAnalyze(f)"
           >
             <div class="funnel-name">{{ f.name }}</div>
-            <div class="funnel-meta">{{ f.steps.length }} 步骤 · {{ f.window_minutes }} 分钟窗口</div>
+            <div class="funnel-meta">
+              {{ f.steps.length }} 步骤 · {{ f.window_minutes }} 分钟窗口
+            </div>
             <div class="funnel-actions">
               <el-button link size="small" @click.stop="openEdit(f)">编辑</el-button>
-              <el-button link size="small" type="danger" @click.stop="handleDelete(f)">删除</el-button>
+              <el-button link size="small" type="danger" @click.stop="handleDelete(f)"
+                >删除</el-button
+              >
             </div>
           </div>
         </div>
@@ -192,25 +244,33 @@ watch(() => projectStore.currentId, () => { fetchFunnels(); fetchEventOptions();
     </div>
 
     <!-- 右侧：分析结果 -->
-    <div style="flex:1;min-width:0">
+    <div style="flex: 1; min-width: 0">
       <el-card shadow="never">
         <template #header>
-          <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="display: flex; justify-content: space-between; align-items: center">
             <span>{{ selected ? selected.name + ' — 漏斗分析' : '选择左侧漏斗查看分析' }}</span>
-            <div v-if="selected" style="display:flex;align-items:center;gap:8px">
-              <el-select v-model="groupBy" clearable placeholder="分组" style="width:120px" @change="doAnalyze(selected!)">
+            <div v-if="selected" style="display: flex; align-items: center; gap: 8px">
+              <el-select
+                v-model="groupBy"
+                clearable
+                placeholder="分组"
+                style="width: 120px"
+                @change="doAnalyze(selected!)"
+              >
                 <el-option label="浏览器" value="browser" />
                 <el-option label="系统" value="os" />
                 <el-option label="设备" value="device_type" />
                 <el-option label="环境" value="environment" />
                 <el-option label="版本" value="release" />
               </el-select>
-              <el-select v-model="analyzeDays" style="width:120px" @change="doAnalyze(selected!)">
+              <el-select v-model="analyzeDays" style="width: 120px" @change="doAnalyze(selected!)">
                 <el-option label="近 7 天" :value="7" />
                 <el-option label="近 14 天" :value="14" />
                 <el-option label="近 30 天" :value="30" />
               </el-select>
-              <el-button type="primary" :loading="analyzeLoading" @click="doAnalyze(selected!)">重新分析</el-button>
+              <el-button type="primary" :loading="analyzeLoading" @click="doAnalyze(selected!)"
+                >重新分析</el-button
+              >
             </div>
           </div>
         </template>
@@ -219,10 +279,16 @@ watch(() => projectStore.currentId, () => { fetchFunnels(); fetchEventOptions();
         <div v-else v-loading="analyzeLoading">
           <div v-if="analyzeResult.length">
             <!-- 整体转化率 -->
-            <el-alert :title="`整体转化率：${(overallConversion * 100).toFixed(1)}%`" type="info" show-icon :closable="false" style="margin-bottom:16px" />
+            <el-alert
+              :title="`整体转化率：${(overallConversion * 100).toFixed(1)}%`"
+              type="info"
+              show-icon
+              :closable="false"
+              style="margin-bottom: 16px"
+            />
 
             <!-- 漏斗图 -->
-            <div ref="chartRef" style="width:100%;height:300px;margin-bottom:16px" />
+            <div ref="chartRef" style="width: 100%; height: 300px; margin-bottom: 16px" />
 
             <!-- 步骤明细表 -->
             <el-table :data="analyzeResult" border size="small">
@@ -240,15 +306,27 @@ watch(() => projectStore.currentId, () => { fetchFunnels(); fetchEventOptions();
               </el-table-column>
               <el-table-column label="平均转化时长" width="130">
                 <template #default="{ row }">
-                  {{ row.avg_time_to_next_ms ? (row.avg_time_to_next_ms / 1000).toFixed(1) + ' 秒' : '-' }}
+                  {{
+                    row.avg_time_to_next_ms
+                      ? (row.avg_time_to_next_ms / 1000).toFixed(1) + ' 秒'
+                      : '-'
+                  }}
                 </template>
               </el-table-column>
             </el-table>
 
-            <el-table v-if="breakdown.length" :data="breakdown" border size="small" style="margin-top:16px">
+            <el-table
+              v-if="breakdown.length"
+              :data="breakdown"
+              border
+              size="small"
+              style="margin-top: 16px"
+            >
               <el-table-column prop="group" label="分组" width="120" />
               <el-table-column label="整体转化率" width="120">
-                <template #default="{ row }">{{ (row.overall_conversion * 100).toFixed(1) }}%</template>
+                <template #default="{ row }"
+                  >{{ (row.overall_conversion * 100).toFixed(1) }}%</template
+                >
               </el-table-column>
               <el-table-column
                 v-for="(_, idx) in breakdownStepLabels"
@@ -275,16 +353,32 @@ watch(() => projectStore.currentId, () => { fetchFunnels(); fetchEventOptions();
         </el-form-item>
         <el-form-item label="转化窗口">
           <el-input-number v-model="formWindow" :min="1" :max="43200" />
-          <span style="margin-left:8px;color:#999">分钟</span>
+          <span style="margin-left: 8px; color: #999">分钟</span>
         </el-form-item>
         <el-form-item label="步骤">
-          <div v-for="(step, idx) in formSteps" :key="idx" style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-            <el-tag type="info" size="small" style="flex-shrink:0">步骤 {{ idx + 1 }}</el-tag>
-            <el-select v-model="step.event" filterable allow-create placeholder="选择或输入事件名" style="flex:1">
+          <div
+            v-for="(step, idx) in formSteps"
+            :key="idx"
+            style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px"
+          >
+            <el-tag type="info" size="small" style="flex-shrink: 0">步骤 {{ idx + 1 }}</el-tag>
+            <el-select
+              v-model="step.event"
+              filterable
+              allow-create
+              placeholder="选择或输入事件名"
+              style="flex: 1"
+            >
               <el-option v-for="ev in eventOptions" :key="ev" :label="ev" :value="ev" />
             </el-select>
-            <el-input v-model="step.display_name" placeholder="展示名（可选）" style="width:120px" />
-            <el-button :disabled="formSteps.length <= 2" link type="danger" @click="removeStep(idx)">删除</el-button>
+            <el-input
+              v-model="step.display_name"
+              placeholder="展示名（可选）"
+              style="width: 120px"
+            />
+            <el-button :disabled="formSteps.length <= 2" link type="danger" @click="removeStep(idx)"
+              >删除</el-button
+            >
           </div>
           <el-button size="small" @click="addStep">+ 添加步骤</el-button>
         </el-form-item>
@@ -306,9 +400,22 @@ watch(() => projectStore.currentId, () => { fetchFunnels(); fetchEventOptions();
   border: 1px solid transparent;
   transition: all 0.2s;
 }
-.funnel-item:hover { background: #f5f7fa; }
-.funnel-item.active { background: #ecf5ff; border-color: #b3d8ff; }
-.funnel-name { font-weight: 500; margin-bottom: 4px; }
-.funnel-meta { font-size: 12px; color: #999; }
-.funnel-actions { margin-top: 6px; }
+.funnel-item:hover {
+  background: #f5f7fa;
+}
+.funnel-item.active {
+  background: #ecf5ff;
+  border-color: #b3d8ff;
+}
+.funnel-name {
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+.funnel-meta {
+  font-size: 12px;
+  color: #999;
+}
+.funnel-actions {
+  margin-top: 6px;
+}
 </style>

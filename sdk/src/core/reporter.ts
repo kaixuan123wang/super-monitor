@@ -43,6 +43,8 @@ export class Reporter {
   private timer: ReturnType<typeof setInterval> | null = null;
   private readonly debug: boolean;
   private readonly getContext: () => ReportContext;
+  private flushing = false;
+  private drainGuard = false;
 
   constructor(options: ReporterOptions) {
     const base = options.server.replace(/\/$/, '');
@@ -60,14 +62,16 @@ export class Reporter {
     this.getContext = options.getContext || (() => ({}));
   }
 
+  private flushSyncHandler = () => this.flushSync();
+
   /** 启动定时批量上报 */
   start(): void {
     if (this.timer) return;
     this.timer = setInterval(() => this.flush(), this.flushInterval);
 
     if (typeof window !== 'undefined') {
-      window.addEventListener('beforeunload', () => this.flushSync());
-      window.addEventListener('pagehide', () => this.flushSync());
+      window.addEventListener('beforeunload', this.flushSyncHandler);
+      window.addEventListener('pagehide', this.flushSyncHandler);
     }
   }
 
@@ -76,6 +80,10 @@ export class Reporter {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
+    }
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('beforeunload', this.flushSyncHandler);
+      window.removeEventListener('pagehide', this.flushSyncHandler);
     }
   }
 
@@ -92,18 +100,40 @@ export class Reporter {
     this.store.enqueue(payload);
   }
 
-  /** 立即上报（通过 fetch） */
+  /** 立即上报（通过 fetch），整体超时 60s */
   async flush(): Promise<void> {
+    if (this.flushing || this.drainGuard) return;
+    this.flushing = true;
+    this.drainGuard = true;
     const items = this.store.drain();
-    if (items.length === 0) return;
-    await this.sendWithRetry(this.wrapBatch(items), 0);
+    this.drainGuard = false;
+    if (items.length === 0) {
+      this.flushing = false;
+      return;
+    }
+    try {
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('flush timeout')), 60_000),
+      );
+      await Promise.race([this.sendWithRetry(this.wrapBatch(items), 0), timeout]);
+    } catch {
+      // 发送失败或超时，将数据回写队列以避免丢失
+      for (const item of items) {
+        this.store.enqueue(item);
+      }
+    }
+    this.flushing = false;
   }
 
-  /** 页面关闭时尽量同步上报 */
+  /** 页面关闭时尽量同步上报（不做重试，避免阻塞） */
   flushSync(): void {
+    if (this.drainGuard) return; // 正在 flush 中，避免竞态
+    this.drainGuard = true;
     const items = this.store.drain();
+    this.drainGuard = false;
     if (items.length === 0) return;
     const body = JSON.stringify(this.wrapBatch(items));
+    // 页面关闭时只做单次发送，不做重试（最多等 90s 会阻塞页面卸载）
     // 仅当浏览器真正支持 keepalive 时才用 fetch；否则同步 XHR 更可靠
     if (typeof fetch === 'function' && supportsFetchKeepalive) {
       try {
@@ -164,9 +194,12 @@ export class Reporter {
         body: JSON.stringify(body),
         keepalive: true,
       });
-      if (!resp.ok && attempt < this.retryMaxCount) {
-        await this.delay(this.retryInterval * (attempt + 1));
-        return this.sendWithRetry(body, attempt + 1);
+      if (!resp.ok) {
+        if (attempt < this.retryMaxCount) {
+          await this.delay(this.retryInterval * (attempt + 1));
+          return this.sendWithRetry(body, attempt + 1);
+        }
+        throw new Error(`Report failed with status ${resp.status}`);
       }
     } catch (e) {
       if (this.debug && typeof console !== 'undefined') {
@@ -176,6 +209,7 @@ export class Reporter {
         await this.delay(this.retryInterval * (attempt + 1));
         return this.sendWithRetry(body, attempt + 1);
       }
+      throw e;
     }
   }
 

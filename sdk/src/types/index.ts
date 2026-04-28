@@ -116,7 +116,7 @@ export type Properties = Record<string, PropertyValue>;
 
 /** JS 错误数据 */
 export interface ErrorData {
-  type: 'js' | 'promise' | 'resource' | 'vue' | 'react';
+  type: 'js' | 'promise' | 'resource';
   message: string;
   stack?: string;
   source_url?: string;

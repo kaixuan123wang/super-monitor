@@ -48,7 +48,7 @@ export function installPerformancePlugin(options: PerformancePluginOptions): () 
     try {
       const [nav] = performance.getEntriesByType('navigation') as PerformanceNavigationTiming[];
       if (!nav) return;
-      data.ttfb = Math.round(nav.responseStart - nav.requestStart);
+      data.ttfb = Math.round(nav.responseStart - nav.startTime);
       data.load_time = Math.round(nav.loadEventEnd - nav.startTime);
       data.dns_time = Math.round(nav.domainLookupEnd - nav.domainLookupStart);
       data.tcp_time = Math.round(nav.connectEnd - nav.connectStart);

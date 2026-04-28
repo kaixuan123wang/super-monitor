@@ -43,8 +43,12 @@ function formatBreadcrumbTime(ts: unknown): string {
         <el-descriptions-item label="源文件" :span="2">
           <code>{{ row.source_url }}:{{ row.line }}:{{ row.column }}</code>
         </el-descriptions-item>
-        <el-descriptions-item label="浏览器">{{ row.browser }} {{ row.browser_version }}</el-descriptions-item>
-        <el-descriptions-item label="操作系统">{{ row.os }} {{ row.os_version }}</el-descriptions-item>
+        <el-descriptions-item label="浏览器"
+          >{{ row.browser }} {{ row.browser_version }}</el-descriptions-item
+        >
+        <el-descriptions-item label="操作系统"
+          >{{ row.os }} {{ row.os_version }}</el-descriptions-item
+        >
         <el-descriptions-item label="设备类型">{{ row.device_type }}</el-descriptions-item>
         <el-descriptions-item label="语言">{{ row.language }}</el-descriptions-item>
         <el-descriptions-item label="页面 URL" :span="2">{{ row.url }}</el-descriptions-item>

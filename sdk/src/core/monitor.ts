@@ -14,7 +14,7 @@ import type {
   ReportContext,
   BreadcrumbItem,
 } from '../types';
-import { createLogger, now, parseUA } from './utils';
+import { createLogger, now, parseUA, sanitizeUrl } from './utils';
 import { Store } from './store';
 import { Reporter, buildReporterFromConfig } from './reporter';
 import { Identity } from './identity';
@@ -113,7 +113,7 @@ class MonitorSDK {
     return this.reporter!.flush();
   }
 
-  /** 销毁 SDK（主要用于测试 / 插件热卸载） */
+  /** 销毁 SDK（主要用于测试 / 插件热卸载），销毁后可重新 init */
   destroy(): void {
     for (const fn of this.cleanups) {
       try {
@@ -124,6 +124,13 @@ class MonitorSDK {
     }
     this.cleanups = [];
     this.reporter?.stop();
+    this.reporter = null;
+    this.store = null;
+    this.identity = null;
+    this.superProps = null;
+    this.timer = null;
+    this.breadcrumb = null;
+    this.config = null;
     this.initialized = false;
   }
 
@@ -272,15 +279,22 @@ class MonitorSDK {
     const report = (p: CollectPayload): void => this.reporter!.report(p);
 
     if (cfg.plugins?.breadcrumb !== false) {
-      this.cleanups.push(installBreadcrumbPlugin({ buffer: this.breadcrumb! }));
+      this.cleanups.push(
+        installBreadcrumbPlugin({ buffer: this.breadcrumb!, sanitize: cfg.sanitize })
+      );
     }
 
     if (cfg.plugins?.console) {
-      this.cleanups.push(installConsolePlugin({ buffer: this.breadcrumb! }));
+      this.cleanups.push(installConsolePlugin({
+        buffer: this.breadcrumb!,
+        sanitize: cfg.sanitize,
+      }));
     }
 
     if (cfg.plugins?.error !== false) {
-      this.cleanups.push(installErrorPlugin({ report, debug: cfg.debug }));
+      this.cleanups.push(
+        installErrorPlugin({ report, debug: cfg.debug, sanitize: cfg.sanitize })
+      );
     }
 
     if (cfg.plugins?.network !== false) {
@@ -315,6 +329,7 @@ class MonitorSDK {
             track: (event, properties, priority) =>
               this.trackWithPriority(event, properties as import('../types').Properties, priority),
             config: cfg.tracking,
+            sanitize: cfg.sanitize,
           })
         );
       }
@@ -322,7 +337,9 @@ class MonitorSDK {
       if (autoTrackCfg.exposure === true) {
         this.cleanups.push(
           installExposurePlugin({
-            track: (event, properties) => this.track(event, properties as import('../types').Properties),
+            track: (event, properties) =>
+              this.track(event, properties as import('../types').Properties),
+            sanitize: cfg.sanitize,
           })
         );
       }
@@ -339,9 +356,9 @@ class MonitorSDK {
     };
     if (typeof window !== 'undefined') {
       try {
-        ctx.url = window.location?.href;
+        ctx.url = sanitizeUrl(window.location?.href, cfg.sanitize?.sensitiveQueryKeys);
         ctx.title = document.title;
-        ctx.referrer = document.referrer;
+        ctx.referrer = sanitizeUrl(document.referrer, cfg.sanitize?.sensitiveQueryKeys);
         ctx.user_agent = navigator.userAgent;
         ctx.language = navigator.language;
         ctx.timezone = Intl?.DateTimeFormat

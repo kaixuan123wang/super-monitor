@@ -34,13 +34,7 @@ const form = reactive({
   avatar: '',
 });
 
-const roleOptions = [
-  'super_admin',
-  'admin',
-  'owner',
-  'member',
-  'readonly',
-];
+const roleOptions = ['super_admin', 'admin', 'owner', 'member', 'readonly'];
 
 async function fetchGroups() {
   const res = await listGroups({ page: 1, page_size: 200 });
@@ -100,8 +94,12 @@ async function saveUser() {
     ElMessage.warning('请填写用户名和邮箱');
     return;
   }
-  if (!editing.value && form.password.length < 6) {
-    ElMessage.warning('新用户密码至少 6 位');
+  if (!editing.value && form.password.length < 12) {
+    ElMessage.warning('新用户密码至少 12 位');
+    return;
+  }
+  if (editing.value && form.password && form.password.length < 12) {
+    ElMessage.warning('新密码至少 12 位');
     return;
   }
 
@@ -138,10 +136,14 @@ async function saveUser() {
 }
 
 async function handleDelete(row: User) {
-  await ElMessageBox.confirm(`确认删除用户「${row.username}」？`, '确认', { type: 'warning' });
-  await deleteUser(row.id);
-  ElMessage.success('已删除');
-  fetchUsers();
+  try {
+    await ElMessageBox.confirm(`确认删除用户「${row.username}」？`, '确认', { type: 'warning' });
+    await deleteUser(row.id);
+    ElMessage.success('已删除');
+    fetchUsers();
+  } catch {
+    // 用户取消或请求失败
+  }
 }
 
 function groupName(groupId?: number | null) {
@@ -180,12 +182,24 @@ onMounted(async () => {
         />
       </el-form-item>
       <el-form-item label="角色">
-        <el-select v-model="roleFilter" clearable placeholder="全部" style="width: 150px" @change="search">
+        <el-select
+          v-model="roleFilter"
+          clearable
+          placeholder="全部"
+          style="width: 150px"
+          @change="search"
+        >
           <el-option v-for="role in roleOptions" :key="role" :label="role" :value="role" />
         </el-select>
       </el-form-item>
       <el-form-item label="分组">
-        <el-select v-model="groupFilter" clearable placeholder="全部" style="width: 180px" @change="search">
+        <el-select
+          v-model="groupFilter"
+          clearable
+          placeholder="全部"
+          style="width: 180px"
+          @change="search"
+        >
           <el-option v-for="g in groups" :key="g.id" :label="g.name" :value="g.id" />
         </el-select>
       </el-form-item>

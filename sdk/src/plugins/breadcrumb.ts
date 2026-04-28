@@ -6,11 +6,13 @@
  * Console / Network 面包屑分别由对应插件写入同一个 buffer。
  */
 
-import type { BreadcrumbItem } from '../types';
+import type { BreadcrumbItem, SanitizeConfig } from '../types';
 import { BreadcrumbBuffer } from '../core/breadcrumb-buffer';
+import { sanitizeUrl } from '../core/utils';
 
 export interface BreadcrumbPluginOptions {
   buffer: BreadcrumbBuffer;
+  sanitize?: SanitizeConfig;
 }
 
 function describeElement(el: Element | null): string {
@@ -32,7 +34,7 @@ export function installBreadcrumbPlugin(options: BreadcrumbPluginOptions): () =>
     };
   }
 
-  const { buffer } = options;
+  const { buffer, sanitize } = options;
 
   // 点击
   const clickHandler = (e: MouseEvent): void => {
@@ -47,54 +49,58 @@ export function installBreadcrumbPlugin(options: BreadcrumbPluginOptions): () =>
 
   // 路由跳转 (hashchange / popstate)
   const onHash = (): void => {
+    const url = sanitizeUrl(location.href, sanitize?.sensitiveQueryKeys);
     buffer.push({
       category: 'navigation',
-      message: `hashchange → ${location.href}`,
-      data: { url: location.href },
+      message: `hashchange -> ${url}`,
+      data: { url },
     });
   };
   const onPop = (): void => {
+    const url = sanitizeUrl(location.href, sanitize?.sensitiveQueryKeys);
     buffer.push({
       category: 'navigation',
-      message: `popstate → ${location.href}`,
-      data: { url: location.href },
+      message: `popstate -> ${url}`,
+      data: { url },
     });
   };
   window.addEventListener('hashchange', onHash);
   window.addEventListener('popstate', onPop);
 
-  // pushState / replaceState
-  const origPush = history.pushState;
-  const origReplace = history.replaceState;
+  // pushState / replaceState — 保存当前引用以便链式调用
+  const prevPush = history.pushState;
+  const prevReplace = history.replaceState;
   history.pushState = function (
     data: unknown,
     unused: string,
     url?: string | URL | null
   ): void {
+    const nextUrl = sanitizeUrl(String(url ?? location.href), sanitize?.sensitiveQueryKeys);
     buffer.push({
       category: 'navigation',
-      message: `pushState → ${url ?? location.href}`,
+      message: `pushState -> ${nextUrl}`,
     });
-    return origPush.apply(this, [data, unused, url] as unknown as Parameters<typeof origPush>);
+    return prevPush.apply(this, [data, unused, url] as unknown as Parameters<typeof prevPush>);
   };
   history.replaceState = function (
     data: unknown,
     unused: string,
     url?: string | URL | null
   ): void {
+    const nextUrl = sanitizeUrl(String(url ?? location.href), sanitize?.sensitiveQueryKeys);
     buffer.push({
       category: 'navigation',
-      message: `replaceState → ${url ?? location.href}`,
+      message: `replaceState -> ${nextUrl}`,
     });
-    return origReplace.apply(this, [data, unused, url] as unknown as Parameters<typeof origReplace>);
+    return prevReplace.apply(this, [data, unused, url] as unknown as Parameters<typeof prevReplace>);
   };
 
   return () => {
     document.removeEventListener('click', clickHandler, true);
     window.removeEventListener('hashchange', onHash);
     window.removeEventListener('popstate', onPop);
-    history.pushState = origPush;
-    history.replaceState = origReplace;
+    history.pushState = prevPush;
+    history.replaceState = prevReplace;
   };
 }
 

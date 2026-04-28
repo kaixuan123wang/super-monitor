@@ -17,8 +17,8 @@ export class BreadcrumbBuffer {
 
   push(item: Omit<BreadcrumbItem, 'timestamp'> & { timestamp?: number }): void {
     const full: BreadcrumbItem = {
-      timestamp: item.timestamp ?? now(),
       ...item,
+      timestamp: item.timestamp ?? now(),
     };
     this.items.push(full);
     if (this.items.length > this.maxSize) {

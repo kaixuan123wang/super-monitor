@@ -23,8 +23,16 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(TrackEvents::ProjectId).integer().not_null())
                     .col(ColumnDef::new(TrackEvents::AppId).string_len(32).not_null())
-                    .col(ColumnDef::new(TrackEvents::DistinctId).string_len(128).not_null())
-                    .col(ColumnDef::new(TrackEvents::AnonymousId).string_len(128).null())
+                    .col(
+                        ColumnDef::new(TrackEvents::DistinctId)
+                            .string_len(128)
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(TrackEvents::AnonymousId)
+                            .string_len(128)
+                            .null(),
+                    )
                     .col(ColumnDef::new(TrackEvents::UserId).string_len(128).null())
                     .col(
                         ColumnDef::new(TrackEvents::IsLoginId)
@@ -32,7 +40,11 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default(false),
                     )
-                    .col(ColumnDef::new(TrackEvents::Event).string_len(128).not_null())
+                    .col(
+                        ColumnDef::new(TrackEvents::Event)
+                            .string_len(128)
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(TrackEvents::EventType)
                             .string_len(20)
@@ -40,24 +52,64 @@ impl MigrationTrait for Migration {
                             .default("custom"),
                     )
                     .col(ColumnDef::new(TrackEvents::Properties).json_binary().null())
-                    .col(ColumnDef::new(TrackEvents::SuperProperties).json_binary().null())
+                    .col(
+                        ColumnDef::new(TrackEvents::SuperProperties)
+                            .json_binary()
+                            .null(),
+                    )
                     .col(ColumnDef::new(TrackEvents::SessionId).string_len(64).null())
-                    .col(ColumnDef::new(TrackEvents::EventDuration).decimal_len(10, 3).null())
+                    .col(
+                        ColumnDef::new(TrackEvents::EventDuration)
+                            .decimal_len(10, 3)
+                            .null(),
+                    )
                     .col(ColumnDef::new(TrackEvents::PageUrl).string_len(1000).null())
-                    .col(ColumnDef::new(TrackEvents::PageTitle).string_len(255).null())
-                    .col(ColumnDef::new(TrackEvents::Referrer).string_len(1000).null())
-                    .col(ColumnDef::new(TrackEvents::UserAgent).string_len(500).null())
+                    .col(
+                        ColumnDef::new(TrackEvents::PageTitle)
+                            .string_len(255)
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(TrackEvents::Referrer)
+                            .string_len(1000)
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(TrackEvents::UserAgent)
+                            .string_len(500)
+                            .null(),
+                    )
                     .col(ColumnDef::new(TrackEvents::Browser).string_len(50).null())
-                    .col(ColumnDef::new(TrackEvents::BrowserVersion).string_len(30).null())
+                    .col(
+                        ColumnDef::new(TrackEvents::BrowserVersion)
+                            .string_len(30)
+                            .null(),
+                    )
                     .col(ColumnDef::new(TrackEvents::Os).string_len(50).null())
                     .col(ColumnDef::new(TrackEvents::OsVersion).string_len(30).null())
-                    .col(ColumnDef::new(TrackEvents::DeviceType).string_len(20).null())
+                    .col(
+                        ColumnDef::new(TrackEvents::DeviceType)
+                            .string_len(20)
+                            .null(),
+                    )
                     .col(ColumnDef::new(TrackEvents::Language).string_len(10).null())
                     .col(ColumnDef::new(TrackEvents::Timezone).string_len(50).null())
-                    .col(ColumnDef::new(TrackEvents::SdkVersion).string_len(20).null())
+                    .col(
+                        ColumnDef::new(TrackEvents::SdkVersion)
+                            .string_len(20)
+                            .null(),
+                    )
                     .col(ColumnDef::new(TrackEvents::Release).string_len(50).null())
-                    .col(ColumnDef::new(TrackEvents::Environment).string_len(20).null())
-                    .col(ColumnDef::new(TrackEvents::ClientTime).timestamp_with_time_zone().null())
+                    .col(
+                        ColumnDef::new(TrackEvents::Environment)
+                            .string_len(20)
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(TrackEvents::ClientTime)
+                            .timestamp_with_time_zone()
+                            .null(),
+                    )
                     .col(
                         ColumnDef::new(TrackEvents::CreatedAt)
                             .timestamp_with_time_zone()
@@ -115,17 +167,41 @@ impl MigrationTrait for Migration {
                             .auto_increment()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(TrackUserProfiles::ProjectId).integer().not_null())
+                    .col(
+                        ColumnDef::new(TrackUserProfiles::ProjectId)
+                            .integer()
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(TrackUserProfiles::DistinctId)
                             .string_len(128)
                             .not_null(),
                     )
-                    .col(ColumnDef::new(TrackUserProfiles::AnonymousId).string_len(128).null())
-                    .col(ColumnDef::new(TrackUserProfiles::UserId).string_len(128).null())
-                    .col(ColumnDef::new(TrackUserProfiles::Name).string_len(100).null())
-                    .col(ColumnDef::new(TrackUserProfiles::Email).string_len(200).null())
-                    .col(ColumnDef::new(TrackUserProfiles::Phone).string_len(20).null())
+                    .col(
+                        ColumnDef::new(TrackUserProfiles::AnonymousId)
+                            .string_len(128)
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(TrackUserProfiles::UserId)
+                            .string_len(128)
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(TrackUserProfiles::Name)
+                            .string_len(100)
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(TrackUserProfiles::Email)
+                            .string_len(200)
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(TrackUserProfiles::Phone)
+                            .string_len(20)
+                            .null(),
+                    )
                     .col(
                         ColumnDef::new(TrackUserProfiles::Properties)
                             .json_binary()
@@ -195,13 +271,21 @@ impl MigrationTrait for Migration {
                             .auto_increment()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(TrackIdMapping::ProjectId).integer().not_null())
+                    .col(
+                        ColumnDef::new(TrackIdMapping::ProjectId)
+                            .integer()
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(TrackIdMapping::AnonymousId)
                             .string_len(128)
                             .not_null(),
                     )
-                    .col(ColumnDef::new(TrackIdMapping::LoginId).string_len(128).not_null())
+                    .col(
+                        ColumnDef::new(TrackIdMapping::LoginId)
+                            .string_len(128)
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(TrackIdMapping::MergedAt)
                             .timestamp_with_time_zone()
