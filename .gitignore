@@ -9,3 +9,6 @@ target/
 .idea/
 .vscode/
 .playwright-mcp/
+plans/
+scripts/ralph/
+sdk-demo-*.png
